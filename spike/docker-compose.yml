@@ -1,0 +1,49 @@
+# Phase 0 spike: a single Neko Tank to test stream quality before building FishTank.
+# Start:  docker compose up -d      (from this folder)
+# Open:   http://localhost:8090    log in with any display name + NEKO_USER_PASSWORD
+#         (use NEKO_ADMIN_PASSWORD to log in as the host/admin)
+# Stop & wipe: docker compose down  (the browser profile lives in tmpfs, so it is gone)
+
+services:
+  tank:
+    image: ghcr.io/m1k1o/neko/firefox:3
+    container_name: fishtank-spike
+    shm_size: 2gb
+    # No volumes: the browser profile lives in the container's writable layer and is
+    # destroyed with the container on `docker compose down`. (Don't put tmpfs over
+    # /home/neko: it hides the image's preconfigured Firefox profile.)
+    ports:
+      # Web UI on host port 8090 (change it if 8090 is taken on your host). Bound to localhost only;
+      # for the external-viewer test, change to "8090:8080" and forward TCP 8090 temporarily.
+      - "127.0.0.1:8090:8080"
+      # WebRTC media, single UDP port (UDPMUX). Forward UDP 59000 on your router for external viewers.
+      - "59000:59000/udp"
+    environment:
+      NEKO_DESKTOP_SCREEN: "1280x720@30"   # 1080p doubles capture+encode cost; try again once a GPU encoder is in place
+      NEKO_MEMBER_PROVIDER: multiuser
+      NEKO_MEMBER_MULTIUSER_USER_PASSWORD: ${NEKO_USER_PASSWORD:?set in .env}
+      NEKO_MEMBER_MULTIUSER_ADMIN_PASSWORD: ${NEKO_ADMIN_PASSWORD:?set in .env}
+      NEKO_WEBRTC_UDPMUX: "59000"
+      NEKO_WEBRTC_ICELITE: "1"
+      # Address viewers use to reach the UDP port. For local testing use 127.0.0.1;
+      # for the external test set PUBLIC_HOST to your public IP / DDNS name in .env.
+      NEKO_WEBRTC_NAT1TO1: ${PUBLIC_HOST:-127.0.0.1}
+      NEKO_SESSION_CONTROL_PROTECTION: "true"
+      # Viewers use external voice apps: no mic/webcam upstream into the Tank.
+      NEKO_CAPTURE_MICROPHONE_ENABLED: "false"
+      NEKO_CAPTURE_WEBCAM_ENABLED: "false"
+    deploy:
+      resources:
+        limits:
+          cpus: "6"   # 2 starved the software VP8 encoder (choppy video, audio dropouts)
+          memory: 3g
+    security_opt:
+      - no-new-privileges:true
+
+# Explicit subnet, in case your host's default Docker address pools are exhausted
+# (auto-assigned networks then fail with "all predefined address pools have been fully subnetted").
+networks:
+  default:
+    ipam:
+      config:
+        - subnet: 10.88.0.0/24

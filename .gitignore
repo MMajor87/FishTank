@@ -1,0 +1,26 @@
+# Secrets and local config (copy .env.example to .env)
+.env
+.env.*
+!.env.example
+spike/.env
+
+# Data: SQLite databases and nightly backups (contain password hashes, TOTP secrets, signing keys)
+data/
+backups/
+*.sqlite
+*.sqlite-journal
+*.sqlite-wal
+*.sqlite-shm
+
+# Build output and dependencies
+node_modules/
+dist/
+*.tsbuildinfo
+
+# Logs and OS/editor clutter
+*.log
+npm-debug.log*
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/

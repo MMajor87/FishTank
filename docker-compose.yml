@@ -1,0 +1,100 @@
+name: fishtank
+
+services:
+  app:
+    build: .
+    image: fishtank-app:local
+    container_name: fishtank-app
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      DOCKER_HOST: http://fishtank-docker-gate:2375
+      TZ: ${TZ:-UTC}   # local time in logs and backup filenames (set TZ in .env)
+    volumes:
+      - fishtank-data:/data
+      # Nightly SQLite backups land in ./backups next to this file (outside the Docker volume).
+      - ./backups:/backups
+    ports:
+      # Local testing only; in production Caddy reaches the app over fishtank-edge.
+      - "127.0.0.1:3080:3000"
+    networks:
+      edge: {}
+      tanks:
+        ipv4_address: 10.88.2.2   # outside the Tank range, so the egress firewall doesn't apply
+      internal: {}
+    # Public resolvers: a LAN DNS server with split-horizon records (e.g. Pi-hole) may answer
+    # your domain with the LAN IP, but TANK_PUBLIC_HOST must resolve to the real public IP for
+    # Neko's NAT1TO1, or remote viewers get an unreachable WebRTC candidate. Container names
+    # still resolve via Docker's embedded DNS.
+    dns:
+      - 1.1.1.1
+      - 1.0.0.1
+    depends_on:
+      - docker-gate
+    security_opt:
+      - no-new-privileges:true
+
+  # The app's only route to Docker. An allowlisting gate (docker-gate/policy.mjs): it can only
+  # create Tank containers that match a strict template (Tank image, Tank network, no privileges,
+  # no host mounts, Tank UDP ports) and start/inspect/stop/remove containers that are Tanks.
+  # Exec, other containers, volumes, networks, builds, etc. are refused.
+  # Reachable only on the internal network (no internet, no Tanks, no Caddy).
+  docker-gate:
+    build: ./docker-gate
+    image: fishtank-docker-gate:local
+    container_name: fishtank-docker-gate
+    restart: unless-stopped
+    environment:
+      TANK_IMAGE: ${TANK_IMAGE:-ghcr.io/m1k1o/neko/firefox:3}
+      TANK_NETWORK: fishtank-tanks
+      TANK_UDP_PORTS: ${TANK_UDP_PORTS:-59000-59009}
+      TANK_MAX_CPUS: 8
+      TANK_MAX_MEMORY_GB: 6
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    networks:
+      - internal
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+
+  # Keeps Tank containers off your LAN / Docker host / other containers (see egress/egress.sh).
+  egress:
+    build: ./egress
+    image: fishtank-egress:local
+    container_name: fishtank-egress
+    restart: unless-stopped
+    network_mode: host
+    cap_add:
+      - NET_ADMIN
+    environment:
+      TANK_SOURCE_RANGE: 10.88.2.128/25
+      ALLOW_DESTINATIONS: ${TANK_ALLOW_DESTINATIONS:-}
+
+networks:
+  # Explicit subnets, so the stack works even when Docker's default address pools are exhausted.
+  # Change them if they collide with networks you already have (and update TRUST_PROXY,
+  # the app's tanks address and the egress TANK_SOURCE_RANGE to match).
+  edge:
+    name: fishtank-edge
+    ipam:
+      config:
+        - subnet: 10.88.1.0/24
+  tanks:
+    name: fishtank-tanks
+    ipam:
+      config:
+        - subnet: 10.88.2.0/24
+          ip_range: 10.88.2.128/25   # Tanks get addresses here; .2 = app, .3 = Caddy
+  internal:
+    name: fishtank-internal
+    internal: true
+    ipam:
+      config:
+        - subnet: 10.88.3.0/24
+
+volumes:
+  fishtank-data:
+    name: fishtank-data

@@ -1,0 +1,493 @@
+:root {
+  --topbar-h: 56px;
+  --bg: #071a24;
+  --bg-deep: #04121a;
+  --surface: #0d2836;
+  --surface-2: #123444;
+  --border: #1f4a5e;
+  --text: #e3f2f7;
+  --muted: #8fb3c1;
+  --accent: #ff8a3d;
+  --accent-text: #1a0b00;
+  --ok: #4fd1a5;
+  --danger: #ff6b6b;
+  --radius: 10px;
+  font-family: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  color: var(--text);
+  background: var(--bg);
+}
+
+@media (prefers-color-scheme: light) {
+  :root {
+    --bg: #eef7fa;
+    --bg-deep: #dceef4;
+    --surface: #ffffff;
+    --surface-2: #f2f9fb;
+    --border: #c5dfe8;
+    --text: #0b2a36;
+    --muted: #4f7482;
+    --accent: #e86a17;
+    --accent-text: #ffffff;
+    --ok: #13895f;
+    --danger: #c73434;
+  }
+}
+
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  min-height: 100vh;
+  background: radial-gradient(ellipse at top, var(--surface-2), var(--bg) 55%, var(--bg-deep));
+  background-attachment: fixed;
+  isolation: isolate;   /* lets the light rays below sit between this background and the page */
+}
+
+/* Sunbeams through water: soft rays fanning down from above the top edge, fading with
+   depth and swaying slowly. Two layers drift at different speeds so the light shimmers. */
+:root {
+  --ray: rgb(150 220 255 / 0.045);
+  --ray-strong: rgb(170 230 255 / 0.08);
+}
+@media (prefers-color-scheme: light) {
+  :root { --ray: rgb(255 255 255 / 0.45); --ray-strong: rgb(255 255 255 / 0.7); }
+}
+body::before, body::after {
+  content: ''; position: fixed; inset: -10% -20% 0; z-index: -1; pointer-events: none;
+  -webkit-mask-image: linear-gradient(to bottom, #000 0%, rgb(0 0 0 / 0.6) 35%, transparent 80%);
+  mask-image: linear-gradient(to bottom, #000 0%, rgb(0 0 0 / 0.6) 35%, transparent 80%);
+  filter: blur(6px);
+}
+body::before {
+  background: conic-gradient(from 150deg at 38% -30%,
+    transparent 0deg, var(--ray) 3deg, transparent 7deg,
+    transparent 12deg, var(--ray-strong) 15deg, transparent 20deg,
+    transparent 26deg, var(--ray) 28deg, transparent 31deg,
+    transparent 37deg, var(--ray-strong) 40deg, transparent 46deg,
+    transparent 53deg, var(--ray) 55deg, transparent 58deg,
+    transparent 360deg);
+  transform-origin: 38% -30%;
+  animation: rays-sway 23s ease-in-out infinite alternate;
+}
+body::after {
+  background: conic-gradient(from 158deg at 62% -35%,
+    transparent 0deg, var(--ray) 2deg, transparent 5deg,
+    transparent 10deg, var(--ray-strong) 12deg, transparent 16deg,
+    transparent 24deg, var(--ray) 26deg, transparent 30deg,
+    transparent 40deg, var(--ray) 42deg, transparent 45deg,
+    transparent 360deg);
+  transform-origin: 62% -35%;
+  animation: rays-sway 31s ease-in-out -9s infinite alternate-reverse, rays-glow 11s ease-in-out infinite alternate;
+}
+@keyframes rays-sway { from { transform: rotate(-2.5deg); } to { transform: rotate(2.5deg); } }
+@keyframes rays-glow { from { opacity: 0.55; } to { opacity: 1; } }
+@media (prefers-reduced-motion: reduce) { body::before, body::after { animation: none; } }
+
+h1, h2 { margin: 0 0 0.4rem; }
+h2 { font-size: 1.15rem; }
+p { margin: 0.25rem 0 0.75rem; }
+
+.center { min-height: 100vh; display: grid; place-items: center; padding: 16px; }
+.page { max-width: 760px; margin: 0 auto; padding: 24px 16px; display: grid; gap: 16px; }
+.card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 20px; }
+.auth { width: 100%; max-width: 380px; }
+.brand { font-weight: 700; letter-spacing: 0.01em; }
+h1.brand { font-size: 1.8rem; }
+.muted { color: var(--muted); }
+.small { font-size: 0.85rem; }
+.mono { font-family: ui-monospace, 'Cascadia Code', Consolas, monospace; }
+.big { font-size: 1.4rem; letter-spacing: 0.06em; }
+.right { text-align: right; }
+.spacer { flex: 1; }
+
+.topbar {
+  display: flex; align-items: center; gap: 12px; height: var(--topbar-h); box-sizing: border-box;
+  padding: 0 16px; border-bottom: 1px solid var(--border); background: var(--surface);
+}
+.badge {
+  margin-left: 6px; padding: 1px 6px; border-radius: 999px; font-size: 0.75rem;
+  background: var(--surface-2); border: 1px solid var(--border); color: var(--accent);
+}
+
+.stack { display: grid; gap: 12px; }
+.row { display: flex; gap: 8px; margin-bottom: 8px; }
+.row input { flex: 1; min-width: 0; }
+label { display: grid; gap: 4px; font-size: 0.9rem; }
+
+input {
+  font: inherit; color: var(--text); background: var(--bg-deep);
+  border: 1px solid var(--border); border-radius: 8px; padding: 9px 11px;
+}
+input:focus-visible, button:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+
+button {
+  font: inherit; cursor: pointer; color: var(--text); background: var(--surface-2);
+  border: 1px solid var(--border); border-radius: 8px; padding: 8px 14px;
+}
+button:disabled { opacity: 0.6; cursor: default; }
+button.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-text); font-weight: 600; }
+button.link { background: none; border: none; padding: 0; color: var(--accent); }
+
+.tabs { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; margin: 12px 0 16px; }
+.tabs button[aria-selected='true'] { border-color: var(--accent); color: var(--accent); }
+
+.error { color: var(--danger); margin: 0; font-size: 0.9rem; }
+.fresh { margin: 12px 0; padding: 14px; border: 1px dashed var(--accent); border-radius: var(--radius); background: var(--bg-deep); }
+
+.codes { width: 100%; border-collapse: collapse; margin-top: 12px; font-size: 0.92rem; }
+.codes th { text-align: left; color: var(--muted); font-weight: 500; padding: 6px 4px; border-bottom: 1px solid var(--border); }
+.codes td { padding: 8px 4px; border-bottom: 1px solid var(--border); }
+.status.active { color: var(--ok); }
+.status.used { color: var(--text); }
+.status.dead { color: var(--muted); }
+
+@media (max-width: 520px) {
+  .row { flex-direction: column; }
+}
+
+/* ---- Friends (Phase 2) ---- */
+h3 { font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.08em; color: var(--muted); margin: 0 0 6px; font-weight: 600; }
+.card-head { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
+.ok { color: var(--ok); margin: 0; font-size: 0.9rem; }
+.group { margin-top: 16px; }
+.people { list-style: none; margin: 0; padding: 0; }
+.people li { display: flex; align-items: center; gap: 10px; padding: 8px 0; border-bottom: 1px solid var(--border); }
+.people li:last-child { border-bottom: none; }
+.person { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.actions { display: flex; align-items: center; gap: 8px; }
+.small-btn { padding: 4px 10px; font-size: 0.85rem; }
+button.link.danger { color: var(--danger); }
+.dot { width: 9px; height: 9px; border-radius: 50%; background: var(--border); flex: none; }
+.dot.on { background: var(--ok); box-shadow: 0 0 6px var(--ok); }
+.menu { position: relative; }
+.menu summary { list-style: none; cursor: pointer; padding: 2px 8px; border-radius: 6px; color: var(--muted); }
+.menu summary::-webkit-details-marker { display: none; }
+.menu[open] summary { background: var(--surface-2); }
+.menu-items {
+  position: absolute; right: 0; top: calc(100% + 4px); z-index: 5; display: grid; gap: 8px; white-space: nowrap;
+  padding: 10px 14px; background: var(--surface); border: 1px solid var(--border); border-radius: 8px;
+}
+.blocked summary { cursor: pointer; }
+.people li[tabindex] { cursor: context-menu; }
+.people li[tabindex]:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 6px; }
+.context-menu {
+  position: fixed; z-index: 20; min-width: 190px; max-width: min(280px, calc(100vw - 16px)); padding: 4px;
+  background: var(--surface); border: 1px solid var(--border); border-radius: 8px; box-shadow: 0 8px 28px rgb(0 0 0 / 0.35);
+}
+.context-menu-title { padding: 6px 10px 4px; font-size: 0.8rem; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.context-menu [role='menuitem'] {
+  display: block; width: 100%; padding: 8px 10px; text-align: left; font: inherit; color: var(--text);
+  background: none; border: 0; border-radius: 6px; cursor: pointer;
+}
+.context-menu [role='menuitem']:hover:not(:disabled), .context-menu [role='menuitem']:focus-visible { background: var(--surface-2); outline: none; }
+.context-menu [role='menuitem']:disabled { color: var(--muted); cursor: default; }
+
+.toasts { position: fixed; right: 16px; bottom: 16px; display: grid; gap: 8px; z-index: 10; max-width: min(360px, calc(100vw - 32px)); }
+.toast { background: var(--surface); border: 1px solid var(--accent); border-radius: var(--radius); padding: 10px 14px; box-shadow: 0 6px 24px rgb(0 0 0 / 0.35); }
+
+@media (max-width: 520px) {
+  .people li { flex-wrap: wrap; }
+}
+
+/* ---- Tanks (Phase 3) ---- */
+a { color: var(--accent); }
+a.plain { color: inherit; text-decoration: none; }
+.dot.starting { background: var(--accent); animation: pulse 1.2s ease-in-out infinite; }
+@keyframes pulse { 50% { opacity: 0.35; } }
+@media (prefers-reduced-motion: reduce) { .dot.starting, .bubbles { animation: none; } }
+select { font: inherit; color: var(--text); background: var(--bg-deep); border: 1px solid var(--border); border-radius: 8px; padding: 8px; }
+.danger-btn { width: 100%; background: transparent; border-color: var(--danger); color: var(--danger); font-weight: 600; }
+.toast { display: flex; align-items: center; gap: 12px; justify-content: space-between; }
+
+/* Room page: Neko fills everything below the top bar; the panel can collapse to a thin rail. */
+.tank-layout {
+  display: grid; grid-template-columns: minmax(0, 1fr) 28px 320px;
+  height: calc(100dvh - var(--topbar-h));
+}
+.tank-layout.collapsed { grid-template-columns: minmax(0, 1fr) 28px; }
+.tank-stage { min-height: 0; min-width: 0; overflow: hidden; background: #000; display: grid; }
+.tank-frame { width: 100%; height: 100%; border: 0; display: block; }
+.tank-filling { display: grid; place-content: center; text-align: center; color: var(--text); background: var(--bg-deep); padding: 24px; }
+.bubbles { font-size: 2.5rem; animation: rise 2s ease-in-out infinite; }
+@keyframes rise { 50% { transform: translateY(-10px); } }
+
+.tank-rail {
+  display: flex; flex-direction: column; align-items: center; gap: 12px; padding-top: 8px;
+  background: var(--surface); border-left: 1px solid var(--border); border-right: 1px solid var(--border);
+}
+.rail-toggle { width: 22px; height: 44px; padding: 0; display: grid; place-items: center; font-size: 1.1rem; line-height: 1; }
+.rail-count { display: grid; justify-items: center; gap: 4px; font-size: 0.75rem; color: var(--muted); }
+.sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+
+.tank-side {
+  display: grid; grid-template-columns: minmax(0, 1fr); gap: 12px; align-content: start;
+  overflow-y: auto; overflow-x: hidden; min-height: 0; min-width: 0; padding: 12px; background: var(--bg-deep);
+}
+/* Everything in a side panel (room page, home page) shrinks to the panel's width: long
+   names truncate, titles wrap. */
+:is(.tank-side, .home-side) > *, :is(.tank-side, .home-side) .card > *, :is(.tank-side, .home-side) .group, :is(.tank-side, .home-side) .people li > * { min-width: 0; }
+:is(.tank-side, .home-side) .card-head h2 { min-width: 0; overflow-wrap: anywhere; }
+:is(.tank-side, .home-side) .card-head > a { flex: none; }
+:is(.tank-side, .home-side) .people li > button, :is(.tank-side, .home-side) .people li > .badge, :is(.tank-side, .home-side) .people li > .muted { flex: none; }
+:is(.tank-side, .home-side) .row > button, :is(.tank-side, .home-side) .row > select { flex: none; }
+:is(.tank-side, .home-side) .fresh .mono { overflow-wrap: anywhere; }
+:is(.tank-side, .home-side) .fresh .row { flex-wrap: wrap; }
+:is(.tank-side, .home-side) .fresh .row input { flex: 1 1 100%; }
+.tank-side[hidden] { display: none; }
+:is(.tank-side, .home-side) .card { padding: 14px; }
+
+@media (max-width: 900px) {
+  .tank-layout, .tank-layout.collapsed { grid-template-columns: 1fr; grid-template-rows: auto auto auto; height: auto; }
+  .tank-stage { aspect-ratio: 16 / 9; }
+  .tank-rail { flex-direction: row; justify-content: center; padding: 6px; border: 0; border-bottom: 1px solid var(--border); }
+  .rail-toggle { width: 44px; height: 24px; transform: rotate(90deg); }
+  .tank-side { overflow: visible; }
+}
+
+/* ---- Home: friends on the left, live Tanks as tiles in the middle ---- */
+.page.home { max-width: 1240px; grid-template-columns: 320px minmax(0, 1fr); align-items: start; }
+.home-side, .home-main { display: grid; gap: 16px; min-width: 0; align-content: start; }
+.home-side { position: sticky; top: 16px; }
+/* The invite-code table is wide; let it scroll inside the narrow column. */
+.home-side .codes { display: block; overflow-x: auto; }
+
+.tank-tiles { list-style: none; margin: 16px 0 0; padding: 0; display: grid; gap: 12px; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); }
+.tank-tile {
+  display: flex; flex-direction: column; gap: 6px; height: 100%; padding: 14px; min-height: 140px;
+  background: var(--surface-2); border: 1px solid var(--border); border-radius: var(--radius);
+  transition: border-color 0.15s, transform 0.15s;
+}
+.tank-tile:hover { border-color: var(--accent); transform: translateY(-2px); }
+.tank-tile:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.tank-tile.mine { border-color: color-mix(in srgb, var(--accent) 55%, var(--border)); }
+.tile-preview {
+  display: grid; place-items: center; aspect-ratio: 16 / 9; margin: -14px -14px 4px; overflow: hidden;
+  border-radius: var(--radius) var(--radius) 0 0; background: var(--bg-deep); border-bottom: 1px solid var(--border);
+}
+.tile-preview img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.friend-main { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; flex: 1; min-width: 0; }
+.in-tank { flex-basis: calc(100% - 36px); margin-left: 36px; display: flex; align-items: center; gap: 6px; color: var(--accent); min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.in-tank button.link { font-size: inherit; margin-left: auto; }
+.friend-tile { width: 100%; text-align: left; font: inherit; color: var(--text); cursor: pointer; font-weight: normal; }
+.friend-tile:disabled { cursor: default; opacity: 0.7; transform: none; }
+.friend-tile .tile-host { display: flex; align-items: center; gap: 6px; }
+.check-row { display: flex; align-items: flex-start; gap: 10px; margin-top: 12px; cursor: pointer; }
+.check-row input { margin-top: 3px; width: auto; flex: none; }
+.small.block { display: block; }
+.tile-top { display: flex; align-items: center; gap: 8px; min-height: 22px; }
+.tile-top .badge { line-height: 1.2; }
+.tile-top .badge { margin-left: auto; }
+.tile-name { font-size: 1.1rem; overflow-wrap: anywhere; }
+.tile-host { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tile-foot { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: auto; padding-top: 8px; border-top: 1px solid var(--border); }
+.tile-open { color: var(--accent); font-weight: 600; font-size: 0.9rem; white-space: nowrap; }
+@media (prefers-reduced-motion: reduce) { .tank-tile { transition: none; } .tank-tile:hover { transform: none; } }
+
+@media (max-width: 900px) {
+  .page.home { grid-template-columns: 1fr; }
+  .home-side { position: static; }
+  .home-main { order: -1; }   /* Tanks first on narrow screens */
+}
+
+/* ---- Account (Phase 4) ---- */
+.qr { background: #fff; padding: 8px; border-radius: 8px; justify-self: start; }
+.recovery { list-style: none; padding: 12px; margin: 0; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px 16px; background: var(--bg-deep); border: 1px dashed var(--accent); border-radius: var(--radius); }
+.page > a.small { justify-self: start; }
+
+/* ---- Admin (Phase 5) ---- */
+.page.wide { max-width: 1100px; }
+.table-scroll { overflow-x: auto; }
+.codes td { vertical-align: middle; }
+.dot.inline { display: inline-block; vertical-align: middle; }
+.meter { position: relative; min-width: 110px; height: 22px; border-radius: 6px; background: var(--bg-deep); border: 1px solid var(--border); overflow: hidden; }
+.meter-bar { position: absolute; inset: 0 auto 0 0; background: color-mix(in srgb, var(--ok) 45%, transparent); }
+.meter-bar.hot { background: color-mix(in srgb, var(--danger) 55%, transparent); }
+.meter span { position: relative; display: block; padding: 2px 8px; line-height: 18px; }
+
+/* ---- Avatars ---- */
+.avatar { border-radius: 50%; object-fit: cover; flex: none; display: inline-block; vertical-align: middle; background: var(--surface-2); }
+.avatar-initial { display: inline-grid; place-items: center; color: #071a24; font-weight: 700; line-height: 1; }
+.me-link { display: inline-flex; align-items: center; gap: 8px; }
+.avatar-edit { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; }
+.avatar-edit .avatar { box-shadow: 0 0 0 2px var(--border); }
+.file-label { display: inline-block; cursor: pointer; }
+.file-label input { position: absolute; width: 1px; height: 1px; opacity: 0; }
+.file-label span { display: inline-block; padding: 8px 14px; border-radius: 8px; border: 1px solid var(--accent); background: var(--accent); color: var(--accent-text); font-weight: 600; }
+.file-label input:focus-visible + span { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+/* ===================================================================================
+   Ocean backdrop (Ocean.tsx) and visual polish
+   =================================================================================== */
+:root {
+  /* Reef in shadow, far → near (the far rows are hazier and lighter). */
+  --reef-0: #0d3341;
+  --reef-1: #0a2835;
+  --reef-2: #071d28;
+  --reef-3: #04121a;
+  --reef-4: #01090e;
+  --reef-sand: #e8c49a;
+  --sun-top: rgb(190 235 255 / 0.22);
+  --sun-mid: rgb(150 215 245 / 0.07);
+  --snow: rgb(200 235 255 / 0.9);
+  --fish: #0b2c3b;
+  --glass: color-mix(in srgb, var(--surface) 70%, transparent);
+  --glass-strong: color-mix(in srgb, var(--surface) 84%, transparent);
+  --glass-edge: rgb(255 255 255 / 0.06);
+  --shadow: 0 12px 40px rgb(0 0 0 / 0.32);
+  --accent-2: #ff6f91;
+  --sea: #3fd6c6;
+}
+@media (prefers-color-scheme: light) {
+  :root {
+    --reef-0: #b9dbe6;
+    --reef-1: #9ccada;
+    --reef-2: #80b4c7;
+    --reef-3: #6399ae;
+    --reef-4: #4a8095;
+    --reef-sand: #fff2dc;
+    --sun-top: rgb(255 255 255 / 0.75);
+    --sun-mid: rgb(255 255 255 / 0.25);
+    --snow: rgb(255 255 255 / 0.95);
+    --fish: #8dbccc;
+    --glass: color-mix(in srgb, var(--surface) 74%, transparent);
+    --glass-strong: color-mix(in srgb, var(--surface) 88%, transparent);
+    --glass-edge: rgb(255 255 255 / 0.7);
+    --shadow: 0 12px 36px rgb(20 70 90 / 0.14);
+  }
+}
+
+/* Deeper water: a bright surface glow fading into the dark. */
+body {
+  background:
+    radial-gradient(ellipse 120% 60% at 50% -10%, color-mix(in srgb, var(--sea) 18%, var(--surface-2)), transparent 60%),
+    linear-gradient(to bottom, var(--surface-2), var(--bg) 45%, var(--bg-deep));
+  background-attachment: fixed;
+}
+
+.ocean { position: fixed; inset: 0; z-index: -2; pointer-events: none; overflow: hidden; }
+.ocean canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; opacity: 0; transition: opacity 1.6s ease-out; }
+.ocean canvas.ready { opacity: 1; }
+@media (prefers-reduced-motion: reduce) { .ocean canvas { transition: none; } }
+
+/* Marine snow: tiny specks sinking slowly. */
+.snow span {
+  position: absolute; top: -12px; border-radius: 50%; background: var(--snow);
+  box-shadow: 0 0 4px var(--snow); animation: snow linear infinite;
+}
+@keyframes snow { from { transform: translate(0, 0); } to { transform: translate(var(--sway), 110vh); } }
+
+/* Bubble streams rising from the reef. */
+.bubble-stream { position: absolute; bottom: 9vh; width: 0; height: 0; }
+.bubble-stream span {
+  position: absolute; bottom: 0; left: 0; border-radius: 50%;
+  border: 1px solid rgb(210 245 255 / 0.55);
+  background: radial-gradient(circle at 30% 30%, rgb(255 255 255 / 0.55), rgb(180 230 255 / 0.08) 60%, transparent 70%);
+  animation: bubble-rise ease-in infinite;
+}
+@keyframes bubble-rise {
+  0% { transform: translate(0, 0) scale(0.6); opacity: 0; }
+  10% { opacity: 0.9; }
+  50% { transform: translate(var(--dx), -38vh) scale(1); }
+  85% { opacity: 0.7; }
+  100% { transform: translate(calc(var(--dx) * -0.6), -80vh) scale(1.15); opacity: 0; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .snow span, .bubble-stream span { animation: none; }
+  .snow, .bubble-stream { display: none; }
+}
+
+/* ---- Frosted-glass surfaces, so the reef shows through ---- */
+.card {
+  background: var(--glass);
+  -webkit-backdrop-filter: blur(14px) saturate(140%);
+  backdrop-filter: blur(14px) saturate(140%);
+  border-color: color-mix(in srgb, var(--border) 75%, transparent);
+  box-shadow: var(--shadow), inset 0 1px 0 var(--glass-edge);
+}
+.topbar {
+  position: sticky; top: 0; z-index: 8;
+  background: var(--glass-strong);
+  -webkit-backdrop-filter: blur(16px) saturate(150%);
+  backdrop-filter: blur(16px) saturate(150%);
+  border-bottom-color: color-mix(in srgb, var(--border) 70%, transparent);
+  box-shadow: 0 4px 24px rgb(0 0 0 / 0.18);
+}
+.toast, .context-menu, .menu-items {
+  background: var(--glass-strong);
+  -webkit-backdrop-filter: blur(16px);
+  backdrop-filter: blur(16px);
+}
+
+/* Wordmark: warm coral gradient (the fish keeps its own colours). */
+.brand {
+  background: linear-gradient(100deg, #ffc06a, var(--accent) 45%, var(--accent-2));
+  -webkit-background-clip: text; background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+.brand > span:first-child { -webkit-text-fill-color: initial; display: inline-block; animation: fish-wiggle 4s ease-in-out infinite; }
+@keyframes fish-wiggle { 0%, 70%, 100% { transform: rotate(0); } 78% { transform: rotate(-10deg); } 86% { transform: rotate(8deg); } }
+h1.brand { font-size: 2.2rem; letter-spacing: -0.01em; }
+
+/* Buttons and inputs */
+button { transition: border-color 0.15s, box-shadow 0.15s, transform 0.1s, background-color 0.15s; }
+button:hover:not(:disabled) { border-color: color-mix(in srgb, var(--accent) 55%, var(--border)); }
+button:active:not(:disabled) { transform: translateY(1px); }
+button.primary {
+  background: linear-gradient(135deg, #ffb35c, var(--accent) 50%, #ff6a5c);
+  border-color: transparent;
+  box-shadow: 0 4px 16px color-mix(in srgb, var(--accent) 30%, transparent);
+}
+button.primary:hover:not(:disabled) { box-shadow: 0 6px 24px color-mix(in srgb, var(--accent) 50%, transparent); border-color: transparent; }
+button.link:hover:not(:disabled) { text-decoration: underline; }
+input, select { transition: border-color 0.15s, box-shadow 0.15s; }
+input:focus-visible, select:focus-visible {
+  outline: none; border-color: var(--accent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 25%, transparent);
+}
+.tabs button[aria-selected='true'] { background: color-mix(in srgb, var(--accent) 12%, var(--surface-2)); }
+
+/* Live dots breathe. */
+.dot.on { animation: dot-breathe 2.4s ease-in-out infinite; }
+@keyframes dot-breathe { 50% { box-shadow: 0 0 10px var(--ok); } }
+
+/* Tank tiles: glassy, lift and glow on hover. */
+.tank-tile {
+  background: color-mix(in srgb, var(--surface-2) 72%, transparent);
+  box-shadow: 0 6px 22px rgb(0 0 0 / 0.22);
+  transition: border-color 0.2s, transform 0.2s, box-shadow 0.2s;
+}
+.tank-tile:hover {
+  transform: translateY(-4px);
+  box-shadow: 0 14px 34px rgb(0 0 0 / 0.3), 0 0 0 1px color-mix(in srgb, var(--accent) 40%, transparent),
+    0 0 28px color-mix(in srgb, var(--sea) 18%, transparent);
+}
+.tank-tile.mine { background: linear-gradient(160deg, color-mix(in srgb, var(--accent) 10%, var(--surface-2)), color-mix(in srgb, var(--surface-2) 72%, transparent)); }
+.tile-preview { position: relative; }
+.tile-preview::after {
+  content: ''; position: absolute; inset: 0; pointer-events: none;
+  background: linear-gradient(to bottom, transparent 55%, rgb(0 0 0 / 0.25)), radial-gradient(ellipse at 50% 0%, rgb(160 230 255 / 0.12), transparent 60%);
+}
+.tank-tile:hover .tile-preview img { transform: scale(1.04); }
+.tile-preview img { transition: transform 0.4s ease; }
+
+/* Gentle entrance for pages and the sign-in card. */
+.page > *, .card.auth { animation: surface-in 0.5s ease-out both; }
+.page > *:nth-child(2) { animation-delay: 0.06s; }
+.page > *:nth-child(3) { animation-delay: 0.12s; }
+.page > *:nth-child(n + 4) { animation-delay: 0.18s; }
+@keyframes surface-in { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: none; } }
+.card.auth { box-shadow: var(--shadow), 0 0 60px color-mix(in srgb, var(--sea) 12%, transparent), inset 0 1px 0 var(--glass-edge); }
+
+/* "Filling the tank": a glowing well while the browser starts. */
+.tank-filling { background: radial-gradient(ellipse at 50% 30%, color-mix(in srgb, var(--sea) 14%, var(--surface-2)), var(--bg-deep) 70%); }
+.tank-side { background: linear-gradient(to bottom, var(--bg), var(--bg-deep)); }
+
+/* Themed scrollbars and selection */
+* { scrollbar-width: thin; scrollbar-color: color-mix(in srgb, var(--border) 90%, transparent) transparent; }
+::selection { background: color-mix(in srgb, var(--accent) 35%, transparent); }
+
+@media (prefers-reduced-motion: reduce) {
+  .page > *, .card.auth, .brand > span:first-child, .dot.on { animation: none; }
+  .tank-tile:hover .tile-preview img { transform: none; }
+}
+

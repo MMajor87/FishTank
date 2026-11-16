@@ -1,0 +1,74 @@
+# FishTank site blocks for Caddy (v2). Replace fishtank.example.com / tanks.example.com with
+# your own names, and make sure APP_ORIGIN and TANK_ORIGIN in .env match them.
+#
+# Caddy must run in Docker and be attached to two FishTank networks so it can reach the app
+# and the Tank containers by name. In Caddy's compose file:
+#
+#   services:
+#     caddy:
+#       networks:
+#         default: {}
+#         fishtank-edge: {}
+#         fishtank-tanks:
+#           # Fixed address outside the Tank range (10.88.2.128/25), so Caddy never takes
+#           # a Tank's address or falls under the Tank egress firewall. .2 is the app.
+#           ipv4_address: 10.88.2.3
+#   networks:
+#     fishtank-edge:
+#       external: true
+#     fishtank-tanks:
+#       external: true
+#
+# Start FishTank first (`docker compose up -d`) so the networks exist. Caddy gets TLS
+# certificates from Let's Encrypt automatically once DNS points at your public IP and
+# TCP 80/443 are forwarded to it. See README.md, "Reverse proxy".
+
+# ---- The app (UI + API + WebSocket) ----
+fishtank.example.com {
+	encode zstd gzip
+
+	header {
+		Strict-Transport-Security "max-age=31536000"
+		X-Content-Type-Options "nosniff"
+		Referrer-Policy "same-origin"
+		-Server
+	}
+
+	# Internal endpoint for the Tank site's forward_auth; never served publicly.
+	handle /auth/* {
+		respond "Not found" 404
+	}
+
+	handle {
+		reverse_proxy fishtank-app:3000
+	}
+}
+
+# ---- Tank browsers, on their own origin ----
+# Every request is checked with the app (session pass + Tank membership + Tank open)
+# before it reaches that Tank's Neko container over fishtank-tanks.
+tanks.example.com {
+	header {
+		Strict-Transport-Security "max-age=31536000"
+		X-Content-Type-Options "nosniff"
+		Referrer-Policy "no-referrer"
+		Content-Security-Policy "frame-ancestors https://fishtank.example.com"
+		-Server
+	}
+
+	@tank path_regexp tank ^/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})/
+	handle @tank {
+		forward_auth fishtank-app:3000 {
+			uri /auth/tank/{re.tank.1}
+			# The auth check is a plain HTTP call even when the browser opens a WebSocket;
+			# don't forward the upgrade headers to it.
+			header_up -Connection
+			header_up -Upgrade
+		}
+		reverse_proxy tank-{re.tank.1}:8080
+	}
+
+	handle {
+		respond "Not found" 404
+	}
+}
