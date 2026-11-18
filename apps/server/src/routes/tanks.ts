@@ -7,7 +7,7 @@ const UUID = '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$';
 const idParams = { type: 'object', required: ['id'], properties: { id: { type: 'string', pattern: UUID } } } as const;
 type IdParams = { Params: { id: string } };
 
-export async function tankRoutes(app: FastifyInstance, { config, tanks }: RouteCtx) {
+export async function tankRoutes(app: FastifyInstance, { config, tanks, recordings }: RouteCtx) {
   app.addHook('preHandler', requireUser);
 
   /** Member-only access to a Tank; 404 for non-members so Tank ids can't be probed. */
@@ -95,6 +95,8 @@ export async function tankRoutes(app: FastifyInstance, { config, tanks }: RouteC
       role,
       members: tanks.members(tank.id),
       pendingInvitees: role === 'host' ? tanks.pendingInviteeIds(tank.id) : [],
+      // null when recording is off. Everyone in the Tank sees when it's being recorded.
+      recording: recordings.tankInfo(tank.id, me),
       embedUrl,
     };
   });

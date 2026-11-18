@@ -1,0 +1,38 @@
+# MediaMTX for the recording spike: RTMP ingest + recording only, everything else off.
+logLevel: info
+logDestinations: [stdout]
+
+# Every action is checked with the app (here: the stub). Non-20x = refused.
+authMethod: http
+authHTTPAddress: http://10.88.4.2:3000/auth/recorder
+authHTTPExclude: []
+
+api: false
+metrics: false
+pprof: false
+playback: false
+rtsp: false
+hls: false
+webrtc: false
+srt: false
+moq: false
+
+rtmp: true
+rtmpAddress: :1935
+rtmpEncryption: "no"
+
+pathDefaults:
+  record: true
+  recordPath: /recordings/raw/%path/%Y-%m-%d_%H-%M-%S-%f_%z
+  recordFormat: fmp4
+  recordPartDuration: 1s
+  # One segment for a whole recording: longer than the longest Tank (TANK_MAX_HOURS).
+  recordSegmentDuration: 9h
+  # Retention is the app's job (RECORDING_KEEP_DAYS), not MediaMTX's (default would be 1 day).
+  recordDeleteAfter: 0s
+  # Remux the finished segment to one seekable MP4 (no re-encode).
+  runOnRecordSegmentComplete: sh /remux.sh
+
+paths:
+  # Any path name; the auth hook decides which ones may publish.
+  all_others:

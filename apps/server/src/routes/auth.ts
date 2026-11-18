@@ -37,7 +37,7 @@ interface LoginBody {
 
 class RegisterConflict extends Error {}
 
-export async function authRoutes(app: FastifyInstance, { config, db, hub }: RouteCtx) {
+export async function authRoutes(app: FastifyInstance, { config, db, hub, recordings }: RouteCtx) {
   // Sliding window of recent failed logins (any username), to stop large-scale guessing.
   let failures: number[] = [];
   const recordFailure = () => failures.push(Date.now());
@@ -172,6 +172,7 @@ export async function authRoutes(app: FastifyInstance, { config, db, hub }: Rout
 
   app.get('/me', async (req, reply) => {
     if (!req.user) return reply.code(401).send({ error: 'Not logged in' });
-    return { user: req.user };
+    // Which optional features this person can use (drives nav links).
+    return { user: req.user, features: { recordings: recordings.enabled && !req.user.guestTankId } };
   });
 }

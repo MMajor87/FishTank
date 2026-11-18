@@ -11,7 +11,13 @@ export type RealtimeEvent =
   | { type: 'tank.invite'; invite: { id: string; tank: { id: string; name: string }; by: UserSummary | null } }
   | { type: 'tank.updated'; tankId: string }
   | { type: 'tank.closed'; tankId: string; name: string; reason: string }
-  | { type: 'tank.removed'; tankId: string; name: string };
+  | { type: 'tank.removed'; tankId: string; name: string }
+  /** A Tank you're in started (by = who) or stopped being recorded, or its timer changed (by = null, active). */
+  | { type: 'tank.recording'; tankId: string; name: string; active: boolean; by: string | null }
+  /** A recording appeared, finished processing or was wiped. */
+  | { type: 'recordings.changed' }
+  | { type: 'tank.playback'; tankId: string; title: string; startedAt: number; by: string }
+  | { type: 'tank.clip'; tankId: string; by: string; seconds: number };
 
 export type ConnectionState = 'connecting' | 'open' | 'reconnecting';
 

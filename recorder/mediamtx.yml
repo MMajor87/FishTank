@@ -1,0 +1,51 @@
+# FishTank recorder (MediaMTX). Tanks push their recording here over RTMP; it writes the stream to
+# disk and remuxes it to a seekable MP4. It accepts nothing the app hasn't approved. Its only server
+# besides RTMP is the playback server, which the app uses to cut clips (only the app holds the
+# credentials it checks). Viewers never talk to it: playback goes through the app. See docs/RECORDING.md.
+logLevel: info
+logDestinations: [stdout]
+
+# Every action is checked with the app (POST JSON). Non-2xx = refused. If the app doesn't know the
+# recording (or recording is disabled), the stream is refused.
+authMethod: http
+authHTTPAddress: http://10.88.2.2:3000/auth/recorder
+authHTTPExclude: []
+
+# Only RTMP ingest. Everything else is explicitly off: new MediaMTX versions add servers that are
+# on by default (1.21 added MoQ), so keep the image version pinned and review this list on upgrade.
+api: false
+metrics: false
+pprof: false
+# Clips ("last minute" of a live recording): the app asks for a time range and gets an MP4 back.
+# Every request goes through the auth hook above (action "playback"), which only accepts the app.
+# Tanks can't reach this port (egress firewall: Tanks may only reach :1935 here).
+playback: true
+playbackAddress: :9996
+rtsp: false
+hls: false
+webrtc: false
+srt: false
+moq: false
+
+rtmp: true
+rtmpAddress: :1935
+rtmpEncryption: "no"
+
+pathDefaults:
+  record: true
+  recordPath: /recordings/raw/%path/%Y-%m-%d_%H-%M-%S-%f_%z
+  recordFormat: fmp4
+  recordPartDuration: 1s
+  # One segment per stream: longer than any Tank can live (TANK_MAX_HOURS, default 8).
+  recordSegmentDuration: 24h
+  # Retention belongs to the app (RECORDING_KEEP_DAYS). MediaMTX's own default would be 1 day.
+  recordDeleteAfter: 0s
+  # Remux each finished segment into a seekable MP4 under /recordings/ready/<id>/.
+  runOnRecordSegmentComplete: sh /recorder/remux.sh
+  # Tell the app when a recording's stream really starts and stops (Neko's status can't be trusted).
+  runOnAvailable: sh /recorder/event.sh ready
+  runOnUnavailable: sh /recorder/event.sh notready
+
+paths:
+  # Any path name (the recording id); the auth hook decides which may publish.
+  all_others:

@@ -319,6 +319,69 @@ recreated:
 docker compose up -d app docker-gate egress
 ```
 
+### Recording (optional)
+
+Off by default. When it's on, admins can record a Tank they're in, and every account can watch
+the recordings until they're wiped. See [docs/RECORDING.md](docs/RECORDING.md) for how it works.
+
+| Variable | Default | Meaning |
+| --- | --- | --- |
+| `COMPOSE_PROFILES` | empty | Set to `recording` to start the recorder container. |
+| `RECORDING_ENABLED` | `false` | `true` turns on the app and firewall side. Set this **and** `COMPOSE_PROFILES`. |
+| `RECORDING_KEEP_DAYS` | `7` | Days after a recording **ends** before it is wiped. |
+| `RECORDING_MAX_HOURS` | `TANK_MAX_HOURS` | Longest single recording. |
+| `RECORDING_VIDEO_KBPS` / `RECORDING_AUDIO_KBPS` | `2500` / `128` | Recording bitrates. 2500 kbps is about 1.2 GB per hour. |
+| `RECORDING_PRESET` | `veryfast` | x264 speed preset. Slower presets give smaller files but use more of the Tank's CPU. |
+| `RECORDINGS_PATH` | empty | A host folder for recordings, e.g. `D:/FishTank/recordings`, instead of the `fishtank-recordings` Docker volume. On Linux it must be writable by uid 1000. |
+| `RECORDING_MIN_FREE_GB` | `10` | Refuse to start a recording when the recordings disk has less free space. |
+| `RECORDING_CLIP_SECONDS` | `60` | Length of a clip ("Clip the last minute"). |
+| `RECORDING_TANK_URL` | `http://10.88.2.2:3001` | Where a Tank's browser opens recordings shared to it ("Watch together"). Change it only with the Docker subnets. |
+
+Only Tanks opened after recording is turned on can be recorded, because the recording settings
+are fixed when a Tank starts. Encoder settings apply to Tanks opened after the change.
+
+**Clips.** While a Tank is being recorded, anyone in it with an account (not guests) can press
+**✂ Clip the last minute**. The last 60 seconds are saved as their own short recording, marked
+**CLIP**. It's listed under Recordings, can be played in Tanks, and is wiped after
+`RECORDING_KEEP_DAYS` like the rest. A clip is about 20 MB. The recorder cuts it from what it has
+already saved, without re-encoding, so it costs no extra CPU. Clipping only works while
+recording, so it can't reach back to before Record was pressed.
+
+**Watch together.** Every finished recording can be played inside any open Tank, so everyone there
+watches it on the Tank's screen, guests included, with the usual control. In the Tank's browser,
+**Recordings** on the bookmarks bar lists them all. Tanks opened before recording was turned on
+have no bookmark, so type `http://10.88.2.2:3001` in their address bar. Accounts can also press
+**Open in Tank** (in the Tank's side panel or on a recording's page), and the recording opens on
+the Tank's screen by itself. That page answers only open Tanks, so its links don't work anywhere else.
+
+**Disk space.** Recordings go in the `fishtank-recordings` Docker volume, or in the host folder
+set by `RECORDINGS_PATH` (use it to put them on a bigger drive). At the default bitrates
+a recording takes about **1.2 GB per hour** (a quiet screen takes less). Plan for the most you
+expect to record within `RECORDING_KEEP_DAYS`. For example, 3 hours a night kept for 7 days is
+about 25 GB. When free space drops below `RECORDING_MIN_FREE_GB`, new recordings are refused.
+The Admin page shows how much space recordings use and how much is free. Recordings are not in
+the nightly backups.
+
+**CPU.** Recording encodes the Tank's screen a second time, inside the Tank. That costs about
+0.7–1.5 extra cores while recording, which `TANK_CPUS=6` covers.
+
+**Privacy.** Turning recording on changes what people can expect from FishTank: normally nothing
+in a Tank outlives it.
+
+- A recording keeps everything on the Tank's screen: signed-in accounts, emails, chat windows and
+  anything typed where it shows. Only the Tank's own sound is recorded, not your microphones or
+  voice chat in other apps.
+- Everyone in a Tank sees a red **REC** badge while it's recorded, with a message naming the
+  admin who started it. People opening an invite link are warned before they join.
+- Every account (not guests) can watch every recording until it's wiped. Anyone who watches can
+  save their own copy, as with any web video, so a wipe only deletes the server's copy.
+- Tell the people you invite that you have recording turned on.
+
+**Other people's content.** Recording your own media (for example your Jellyfin or Plex library)
+is up to you. Recording streaming services such as YouTube, Twitch or Netflix usually breaks
+their terms of service and may infringe copyright. Whether you allow it on your server is your
+decision and your responsibility.
+
 ---
 
 ## Operations
@@ -407,6 +470,12 @@ to personal accounts you wouldn't share with the room. Control is locked to the 
 - **Network:** the egress firewall blocks Tanks from `10/8`, `172.16/12`, `192.168/16`,
   `100.64/10` and `169.254/16` except `TANK_ALLOW_DESTINATIONS`. Its rules stay in place if the
   egress container stops (fail closed) and are re-applied if Docker resets them.
+- **Recording (when on):** a Tank can send video only to the recorder's RTMP port. The recorder
+  accepts a stream only after the app confirms the recording is live, the stream key is right
+  (a new random key for every recording), and the stream comes from the Tank range. The recorder can't reach the
+  internet or your LAN; it can only call the app. Its playback server (used to cut clips) accepts
+  only the app, with a secret that lives in the app's memory, and Tanks can't reach its port. Recordings are served only to signed-in
+  accounts, never cached, and wiped when they expire.
 
 **Recommendations:**
 

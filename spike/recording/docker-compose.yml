@@ -1,0 +1,98 @@
+# Phase 0 spike for Tank recording (docs/RECORDING.md): one Neko Tank broadcasts over RTMP to
+# MediaMTX, which records it and remuxes it to a seekable MP4. A tiny stub stands in for the
+# app's /auth/recorder check and logs exactly what MediaMTX sends.
+#
+# Start:   docker compose up -d                       (from this folder)
+# Watch:   http://localhost:8091   (any name, password "viewer"; "host" for admin)
+# Record:  curl -X POST -H "Authorization: Bearer spike-token" -H "Content-Type: application/json" \
+#            -d '{"url":"rtmp://10.88.4.5:1935/rec1?key=spike-key"}' \
+#            http://localhost:8091/api/room/broadcast/start
+# Stop:    curl -X POST -H "Authorization: Bearer spike-token" http://localhost:8091/api/room/broadcast/stop
+# Output:  ./recordings/ready/<path>.mp4
+# Wipe:    docker compose down && rm -rf recordings
+#
+# Nothing is reachable from outside this PC: every published port is bound to 127.0.0.1.
+
+name: fishtank-recspike
+
+services:
+  tank:
+    image: ghcr.io/m1k1o/neko/firefox:3
+    container_name: recspike-tank
+    shm_size: 2gb
+    ports:
+      - "127.0.0.1:8091:8080"
+      - "127.0.0.1:59010:59010/udp"
+    environment:
+      NEKO_DESKTOP_SCREEN: "1280x720@30"
+      NEKO_MAX_FPS: "30"
+      NEKO_MEMBER_PROVIDER: multiuser
+      NEKO_MEMBER_MULTIUSER_USER_PASSWORD: viewer
+      NEKO_MEMBER_MULTIUSER_ADMIN_PASSWORD: host
+      NEKO_SESSION_API_TOKEN: spike-token
+      NEKO_WEBRTC_UDPMUX: "59010"
+      NEKO_WEBRTC_ICELITE: "1"
+      NEKO_WEBRTC_NAT1TO1: 127.0.0.1
+      NEKO_CAPTURE_MICROPHONE_ENABLED: "false"
+      NEKO_CAPTURE_WEBCAM_ENABLED: "false"
+      # What the app would add to every Tank when recording is enabled (no URL/autostart).
+      # Neko's default broadcast pipeline, changed so browsers can play the result: 4:2:0 (I420)
+      # High profile instead of x264's automatic 4:4:4 (unplayable in Firefox/Safari), 30 fps
+      # instead of 25 (matches the screen), a keyframe every 2s instead of 0.5s.
+      # Neko fills in {url}, {display} and {device}. The *_BITRATE/_PRESET settings are ignored
+      # when a pipeline is set, so the numbers live here.
+      NEKO_CAPTURE_BROADCAST_PIPELINE: >-
+        flvmux name=mux streamable=true ! rtmpsink location='{url} live=1'
+        pulsesrc device={device} ! audio/x-raw,channels=2 ! audioconvert ! queue
+        ! voaacenc bitrate=128000 ! mux.
+        ximagesrc display-name={display} show-pointer=true use-damage=false
+        ! video/x-raw,framerate=30/1 ! videoconvert ! video/x-raw,format=I420 ! queue
+        ! x264enc threads=4 bitrate=2500 key-int-max=60 byte-stream=true tune=zerolatency speed-preset=veryfast
+        ! video/x-h264,profile=high ! mux.
+    deploy:
+      resources:
+        limits:
+          cpus: "6"        # same as TANK_CPUS
+          memory: 3g
+    cap_drop: [NET_RAW, MKNOD, AUDIT_WRITE]
+    security_opt:
+      - no-new-privileges:true
+    networks:
+      rec: {}
+
+  recorder:
+    image: bluenviron/mediamtx:1.21.3-ffmpeg
+    container_name: recspike-recorder
+    volumes:
+      - ./mediamtx.yml:/mediamtx.yml:ro
+      - ./remux.sh:/remux.sh:ro
+      - ./recordings:/recordings
+    read_only: true
+    tmpfs: [/tmp]
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
+    networks:
+      rec:
+        ipv4_address: 10.88.4.5
+
+  # Stand-in for the app's GET /auth/recorder (fixed IP like the app's 10.88.2.2).
+  auth:
+    image: node:24-alpine
+    container_name: recspike-auth
+    command: ["node", "/authstub.mjs"]
+    volumes:
+      - ./authstub.mjs:/authstub.mjs:ro
+    read_only: true
+    cap_drop: [ALL]
+    networks:
+      rec:
+        ipv4_address: 10.88.4.2
+
+networks:
+  rec:
+    name: fishtank-recspike
+    ipam:
+      config:
+        - subnet: 10.88.4.0/24
+          ip_range: 10.88.4.128/25

@@ -25,7 +25,15 @@ export type RealtimeEvent =
   /** A friend's Tank opened, closed or changed: refresh the "Friends' Tanks" list. */
   | { type: 'friends.tanks' }
   /** A friend started or stopped watching a Tank: refresh their "in a Tank" status. */
-  | { type: 'friends.activity'; userId: string };
+  | { type: 'friends.activity'; userId: string }
+  /** A Tank's recording started (by = who) or stopped. Sent to the Tank's members. */
+  | { type: 'tank.recording'; tankId: string; name: string; active: boolean; by: string | null }
+  /** A recording appeared, finished processing or was wiped: refresh the recordings list. */
+  | { type: 'recordings.changed' }
+  // Someone shared a recording to play in this Tank (sent to everyone in it, guests included).
+  | { type: 'tank.playback'; tankId: string; title: string; startedAt: number; by: string }
+  // Someone in the Tank saved a clip of its live recording.
+  | { type: 'tank.clip'; tankId: string; by: string; seconds: number };
 
 /** WebSocket close codes the client understands. */
 export const CLOSE_SESSION_ENDED = 4001;

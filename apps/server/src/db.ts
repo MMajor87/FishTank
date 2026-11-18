@@ -174,6 +174,49 @@ const migrations: string[] = [
     SELECT lower(hex(randomblob(16))), 'account', u.id, u.username, u.invited_by, i.username, u.created_at
     FROM users u LEFT JOIN users i ON i.id = u.invited_by;
   `,
+
+  /* 9: Tank recordings (docs/RECORDING.md) */ `
+  CREATE TABLE recordings (
+    id              TEXT PRIMARY KEY,            -- uuid, also the recorder's stream path and folder name
+    tank_id         TEXT REFERENCES tanks(id) ON DELETE SET NULL,
+    tank_name       TEXT NOT NULL,               -- copied: shown after the Tank is gone
+    started_by      TEXT REFERENCES users(id) ON DELETE SET NULL,
+    started_by_name TEXT NOT NULL,               -- copied, like invite_log
+    key_hash        TEXT NOT NULL,               -- sha256 of the current stream key
+    status          TEXT NOT NULL CHECK (status IN ('recording', 'processing', 'ready', 'failed')),
+    started_at      INTEGER NOT NULL,
+    ended_at        INTEGER,
+    expires_at      INTEGER,                     -- ended_at + RECORDING_KEEP_DAYS
+    duration_ms     INTEGER,
+    size_bytes      INTEGER,
+    parts           TEXT,                        -- JSON [{file, durationMs, sizeBytes}] once ready
+    error           TEXT
+  );
+  CREATE INDEX recordings_expires ON recordings(expires_at);
+  -- At most one live recording per Tank.
+  CREATE UNIQUE INDEX recordings_one_per_tank ON recordings(tank_id) WHERE status = 'recording';
+  `,
+
+  /* 10: recording timer */ `
+  ALTER TABLE recordings ADD COLUMN stop_at INTEGER;   -- set = stop automatically at this time
+  `,
+
+  /* 11: recordings shared to a Tank, to watch together there (docs/RECORDING.md, Phase 5) */ `
+  CREATE TABLE tank_recordings (
+    tank_id        TEXT NOT NULL REFERENCES tanks(id) ON DELETE CASCADE,
+    recording_id   TEXT NOT NULL REFERENCES recordings(id) ON DELETE CASCADE,
+    shared_by      TEXT REFERENCES users(id) ON DELETE SET NULL,
+    shared_by_name TEXT NOT NULL,
+    shared_at      INTEGER NOT NULL,
+    PRIMARY KEY (tank_id, recording_id)
+  );
+  CREATE INDEX tank_recordings_recording ON tank_recordings(recording_id);
+  `,
+
+  /* 12: clips (the last minute of a live recording, saved on its own) */ `
+  ALTER TABLE recordings ADD COLUMN kind TEXT NOT NULL DEFAULT 'recording' CHECK (kind IN ('recording', 'clip'));
+  ALTER TABLE recordings ADD COLUMN source_id TEXT;   -- clips: the recording it was cut from (may be gone)
+  `,
 ];
 
 /** Small key/value store for server-generated secrets. */

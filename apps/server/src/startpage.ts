@@ -128,7 +128,7 @@ export function firefoxUserJs(gpu: WebglGpu): string {
 }
 
 /** Adds FishTank's homepage, bookmark tiles and trusted-site exceptions to the image's own Firefox policies. */
-export function withFishTankPolicies(base: unknown, tiles: StartTile[], trustedSites: string[] = []): object {
+export function withFishTankPolicies(base: unknown, tiles: StartTile[], trustedSites: string[] = [], autoplayOrigins: string[] = []): object {
   const doc = (base && typeof base === 'object' ? base : {}) as { policies?: Record<string, unknown> };
   const policies = { ...(doc.policies ?? {}) };
   policies.Homepage = { URL: START_PAGE_URL, Locked: false, StartPage: 'homepage' };
@@ -137,6 +137,13 @@ export function withFishTankPolicies(base: unknown, tiles: StartTile[], trustedS
     ...tiles.map((t) => ({ Title: t.title, URL: t.url, Placement: 'toolbar' })),
   ];
   policies.DisplayBookmarksToolbar = true;
+  if (autoplayOrigins.length) {
+    // The Tank-side Recordings page starts a shared recording with sound, without a click.
+    const perms = (policies.Permissions ?? {}) as Record<string, unknown>;
+    const autoplay = (perms.Autoplay ?? {}) as { Allow?: string[] };
+    perms.Autoplay = { ...autoplay, Allow: [...new Set([...(autoplay.Allow ?? []), ...autoplayOrigins])] };
+    policies.Permissions = perms;
+  }
   if (trustedSites.length) {
     // Firefox tracking/fingerprinting protection off for these sites (exceptions are per origin).
     const etp = (policies.EnableTrackingProtection ?? {}) as Record<string, unknown>;

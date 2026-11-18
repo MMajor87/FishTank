@@ -22,7 +22,9 @@ COPY apps/web/package.json apps/web/
 RUN npm ci --omit=dev -w apps/server && npm cache clean --force
 COPY apps/server/src apps/server/src
 COPY --from=web /app/apps/web/dist apps/web/dist
-RUN mkdir -p /data && chown node:node /data
+# /recordings: the app image creates the recordings volume, so it is owned by node (uid 1000),
+# which the recorder also runs as.
+RUN mkdir -p /data /recordings && chown node:node /data /recordings
 USER node
 EXPOSE 3000
 HEALTHCHECK --interval=30s --timeout=3s CMD node -e "fetch('http://127.0.0.1:3000/api/health').then(r=>process.exit(r.ok?0:1),()=>process.exit(1))"

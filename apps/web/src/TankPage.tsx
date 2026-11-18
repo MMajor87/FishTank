@@ -1,8 +1,10 @@
 import { useEffect, useRef, useState } from 'react';
-import { api, ApiError, type Relations, type TankCode, type TankDetail, type TankMember } from './api.ts';
+import { api, ApiError, type Recording, type Relations, type TankCode, type TankDetail, type TankMember, type TankRecording } from './api.ts';
+import { RecBadge, TimerPicker, clock, span, stopAtFor, timeOfDay, useNow, type TimerChoice } from './recording.tsx';
 import { sendRealtime, useRealtimeEvent } from './realtime.ts';
 import { Link, navigate } from './router.tsx';
 import { Avatar } from './Avatar.tsx';
+import { SideCard } from './SideCard.tsx';
 
 const REASONS: Record<string, string> = {
   'drained by host': 'The host drained this Tank.',
@@ -66,7 +68,7 @@ export function TankPage({ id, me, asGuest = false }: { id: string; me: string; 
 
   useRealtimeEvent((e) => {
     if (e.type === 'connected' && status === 'open') sendRealtime({ type: 'tank.join', tankId: id });
-    if ((e.type === 'tank.updated' || e.type === 'tank.closed') && e.tankId === id) load();
+    if ((e.type === 'tank.updated' || e.type === 'tank.closed' || e.type === 'tank.recording') && e.tankId === id) load();
     if (e.type === 'tank.removed' && e.tankId === id) setRemoved(true);
     if (e.type === 'friends.changed') loadRelations();
   });
@@ -107,10 +109,16 @@ export function TankPage({ id, me, asGuest = false }: { id: string; me: string; 
 
   const isHost = detail.role === 'host';
   const watchingCount = (detail.members ?? []).filter((m) => m.watching).length;
+  const rec = detail.recording ?? null;
 
   return (
     <div className={`tank-layout${collapsed ? ' collapsed' : ''}`}>
       <div className="tank-stage">
+        {rec?.active && (
+          <div className="stage-rec">
+            <RecBadge startedAt={rec.active.startedAt} stopAt={rec.active.stopAt} />
+          </div>
+        )}
         {status === 'open' && src ? (
           <iframe
             className="tank-frame"
@@ -141,6 +149,7 @@ export function TankPage({ id, me, asGuest = false }: { id: string; me: string; 
           <span aria-hidden>{collapsed ? '‹' : '›'}</span>
           <span className="sr-only">{collapsed ? 'Show room panel' : 'Hide room panel'}</span>
         </button>
+        {collapsed && rec?.active && <span className="rec-dot rail-rec" title="Being recorded" />}
         {collapsed && (
           <span className="rail-count" title={`${watchingCount} watching`}>
             <span className="dot on" aria-hidden />
@@ -150,13 +159,15 @@ export function TankPage({ id, me, asGuest = false }: { id: string; me: string; 
       </div>
 
       <aside className="tank-side" id="tank-side" hidden={collapsed}>
-        <div className="card">
-          <div className="card-head">
-            <h2>{detail.tank.name}</h2>
+        <SideCard
+          id="room"
+          title={detail.tank.name}
+          aside={
             <Link to="/" className="small">
               Home
             </Link>
-          </div>
+          }
+        >
           <p className="muted small">
             {isHost
               ? "You are the host. Others can only control the browser once you hand it over or unlock controls in the browser's menu. Guests (no account) can only watch."
@@ -166,7 +177,11 @@ export function TankPage({ id, me, asGuest = false }: { id: string; me: string; 
             Logins inside this browser are visible to everyone in the room and are wiped when it's drained.
           </p>
           <Members detail={detail} me={me} tankId={id} isHost={isHost} rel={rel} onChange={load} onFriendsChange={loadRelations} />
-        </div>
+        </SideCard>
+
+        {rec && (rec.active || rec.canRecord) && <RecordingCard tankId={id} rec={rec} onChange={load} />}
+
+        {rec?.canShare && <WatchTogetherCard tankId={id} rec={rec} guests={(detail.members ?? []).filter((m) => m.isGuest).length} />}
 
         {isHost && <InvitePanel tankId={id} detail={detail} rel={rel} onInvited={load} />}
 
@@ -199,6 +214,224 @@ export function TankPage({ id, me, asGuest = false }: { id: string; me: string; 
         </div>
       </aside>
     </div>
+  );
+}
+
+/**
+ * Recording (admins): start with an optional timer, change the timer, stop. Everyone else in the
+ * Tank sees that it's being recorded, by whom and until when.
+ */
+function RecordingCard({ tankId, rec, onChange }: { tankId: string; rec: TankRecording; onChange: () => void }) {
+  const [choice, setChoice] = useState<TimerChoice>('none');
+  const [at, setAt] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  const [editing, setEditing] = useState(false);
+  const [clipping, setClipping] = useState(false);
+  const [clipNote, setClipNote] = useState('');
+  const active = rec.active;
+  const clip = async () => {
+    setClipping(true);
+    setClipNote('');
+    setError('');
+    try {
+      const r = await api.clip(tankId);
+      setClipNote(`Saved a ${Math.round(r.clip.durationMs / 1000)}-second clip. It's under Recordings.`);
+    } catch (e) {
+      setError(e instanceof ApiError ? e.message : 'Could not save the clip');
+    } finally {
+      setClipping(false);
+    }
+  };
+  const now = useNow(!!active?.stopAt, 15_000);
+
+  const run = async (fn: () => Promise<unknown>) => {
+    setBusy(true);
+    setError('');
+    try {
+      await fn();
+      setEditing(false);
+    } catch (e) {
+      setError(e instanceof ApiError ? e.message : 'Something went wrong');
+    } finally {
+      setBusy(false);
+      onChange();
+    }
+  };
+  /** The picked stop time, checked against the longest a recording may run. */
+  const picked = (startedAt: number) => {
+    const t = Date.now();
+    const r = stopAtFor(choice, at, t, startedAt + rec.maxHours * 3_600_000);
+    if ('error' in r) {
+      setError(r.error);
+      return undefined;
+    }
+    return r.stopAt;
+  };
+
+  if (!active) {
+    return (
+      <SideCard id="record" title="Record">
+        {!rec.supported ? (
+          <p className="muted small">This Tank was opened before recording was turned on. Drain it and open a new one to record.</p>
+        ) : (
+          <>
+            <p className="muted small">
+              Everyone in the Tank sees that it's being recorded. Every account can watch the recording for {rec.keepDays}{' '}
+              {rec.keepDays === 1 ? 'day' : 'days'} after it ends, then it's deleted.
+            </p>
+            <TimerPicker choice={choice} at={at} onChoice={setChoice} onAt={setAt} />
+            <button
+              className="rec-btn"
+              disabled={busy}
+              onClick={() => {
+                const stopAt = picked(Date.now());
+                if (stopAt !== undefined) void run(() => api.startRecording(tankId, stopAt));
+              }}
+            >
+              <span className="rec-dot" aria-hidden /> {busy ? 'Starting…' : 'Record'}
+            </button>
+          </>
+        )}
+        {error && <p className="error">{error}</p>}
+      </SideCard>
+    );
+  }
+
+  return (
+    <SideCard id="record" title="Recording" className="rec-card" aside={<RecBadge startedAt={active.startedAt} compact />}>
+      <p className="muted small">
+        Started by {active.startedBy}.{' '}
+        {active.stopAt ? (
+          <>
+            Stops at <strong>{timeOfDay(active.stopAt)}</strong> ({active.stopAt > now ? `in ${span(active.stopAt - now)}` : 'now'}).
+          </>
+        ) : (
+          <>No timer: it runs until someone stops it or the Tank closes.</>
+        )}
+      </p>
+      {rec.canClip && (
+        <>
+          <button className="clip-btn" disabled={clipping} onClick={clip} title={`Save the last ${rec.clipSeconds} seconds as its own clip`}>
+            ✂ {clipping ? 'Saving clip…' : `Clip the last ${rec.clipSeconds === 60 ? 'minute' : `${rec.clipSeconds} seconds`}`}
+          </button>
+          {clipNote && (
+            <p className="muted small">
+              {clipNote} <Link to="/recordings">Open Recordings</Link>
+            </p>
+          )}
+        </>
+      )}
+      {rec.canRecord && (
+        <>
+          {editing ? (
+            <div className="stack">
+              <TimerPicker choice={choice} at={at} onChoice={setChoice} onAt={setAt} label="New timer" />
+              <div className="row">
+                <button
+                  className="primary"
+                  disabled={busy}
+                  onClick={() => {
+                    const stopAt = picked(active.startedAt);
+                    if (stopAt !== undefined) void run(() => api.setRecordingTimer(tankId, stopAt));
+                  }}
+                >
+                  Save timer
+                </button>
+                <button disabled={busy} onClick={() => (setEditing(false), setError(''))}>
+                  Cancel
+                </button>
+              </div>
+            </div>
+          ) : (
+            <button className="link small" onClick={() => setEditing(true)}>
+              {active.stopAt ? 'Change timer' : 'Set a timer'}
+            </button>
+          )}
+          <button
+            className="danger-btn"
+            disabled={busy}
+            onClick={() => {
+              if (confirm('Stop recording? The recording is saved and appears under Recordings.')) void run(() => api.stopRecording(tankId));
+            }}
+          >
+            ■ Stop recording
+          </button>
+        </>
+      )}
+      {error && <p className="error">{error}</p>}
+    </SideCard>
+  );
+}
+
+/**
+ * Watch together: every finished recording is on the Tank's own Recordings page (its bookmarks bar),
+ * so whoever has control can play one on the Tank's screen for everyone here, guests included.
+ * "Open in Tank" sends one there from this panel, and it opens by itself if that page is open.
+ */
+function WatchTogetherCard({ tankId, rec, guests }: { tankId: string; rec: TankRecording; guests: number }) {
+  const [all, setAll] = useState<Recording[] | null>(null);
+  const [pick, setPick] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  const [note, setNote] = useState('');
+
+  const loadAll = () => {
+    api.recordings().then(
+      (r) => setAll(r.recordings.filter((x) => x.status === 'ready')),
+      () => setAll([]),
+    );
+  };
+  useEffect(loadAll, []);
+  useRealtimeEvent((e) => {
+    if (e.type === 'recordings.changed') loadAll();
+  });
+  const when = (t: number) => new Date(t).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' });
+
+  const open = async () => {
+    if (!pick) return;
+    if (guests > 0 && !confirm(`${guests === 1 ? 'A guest is' : `${guests} guests are`} in this Tank and will see the recording too. Open it?`)) return;
+    setBusy(true);
+    setError('');
+    setNote('');
+    try {
+      await api.shareRecording(tankId, pick);
+      setNote("Sent. It opens by itself if the Tank's Recordings page is open; otherwise click Recordings in the Tank's browser.");
+    } catch (e) {
+      setError(e instanceof ApiError ? e.message : 'Something went wrong');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <SideCard id="watch" title="Watch together">
+      <p className="muted small">
+        Every recording can be played on the Tank's screen for everyone here{guests > 0 ? ', guests included' : ''}. In the Tank's browser,
+        click <strong>Recordings</strong> on the bookmarks bar (or go to <code>{rec.tankUrl}</code>) and pick one.
+      </p>
+      {all === null ? (
+        <p className="muted small">Loading recordings…</p>
+      ) : all.length === 0 ? (
+        <p className="muted small">No finished recordings yet.</p>
+      ) : (
+        <div className="row timer-row">
+          <select value={pick} onChange={(e) => setPick(e.target.value)} aria-label="Recording to open in the Tank">
+            <option value="">Pick a recording…</option>
+            {all.map((r) => (
+              <option key={r.id} value={r.id}>
+                {r.tankName} · {when(r.startedAt)} · {clock(r.durationMs ?? 0)}
+              </option>
+            ))}
+          </select>
+          <button className="primary" disabled={busy || !pick} onClick={open} title="Opens it on the Tank's screen right away">
+            ▶ Open in Tank
+          </button>
+        </div>
+      )}
+      {note && <p className="muted small">{note}</p>}
+      {error && <p className="error">{error}</p>}
+    </SideCard>
   );
 }
 
@@ -421,8 +654,7 @@ function InvitePanel({ tankId, detail, rel, onInvited }: { tankId: string; detai
   };
 
   return (
-    <div className="card">
-      <h2>Invite</h2>
+    <SideCard id="invite" title="Invite">
       <label className="check-row">
         <input
           type="checkbox"
@@ -519,6 +751,6 @@ function InvitePanel({ tankId, detail, rel, onInvited }: { tankId: string; detai
         )}
       </div>
       {error && <p className="error">{error}</p>}
-    </div>
+    </SideCard>
   );
 }

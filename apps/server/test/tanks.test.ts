@@ -6,7 +6,7 @@ import type { WebSocket } from 'ws';
 import { buildApp } from '../src/app.ts';
 import { loadConfig, type Config } from '../src/config.ts';
 import { openDb, type DB } from '../src/db.ts';
-import type { ManagedContainer, NekoMember, Orchestrator, TankCredentials, TankSpec } from '../src/orchestrator.ts';
+import { FakeOrchestrator } from './fake-orchestrator.ts';
 import { SESSION_COOKIE, createSession } from '../src/sessions.ts';
 import { ensureBootstrapCode } from '../src/codes.ts';
 import { GUEST_GRACE_MS } from '../src/tanks.ts';
@@ -16,74 +16,6 @@ import { join } from 'node:path';
 
 const ORIGIN = 'http://localhost:3000';
 const TANK_ORIGIN = 'https://tanks.test';
-
-class FakeOrchestrator implements Orchestrator {
-  /** `legacy` simulates a Tank started by an older version (shared Neko passwords). */
-  containers = new Map<string, { spec: TankSpec; running: boolean; legacy?: TankCredentials }>();
-  /** tankId → Neko username → login. */
-  members = new Map<string, Map<string, NekoMember>>();
-  removed: Array<{ tankId: string; username: string }> = [];
-  async ensureMember(tankId: string, _token: string, m: NekoMember) {
-    if (!this.members.has(tankId)) this.members.set(tankId, new Map());
-    this.members.get(tankId)!.set(m.username, m);
-  }
-  /** Server-side Neko sign-ins: the password must match the member's. Legacy Tanks have no cookie sessions. */
-  logins: Array<{ tankId: string; username: string }> = [];
-  async login(tankId: string, username: string, password: string) {
-    const c = this.containers.get(tankId);
-    if (c?.legacy) return null;
-    const m = this.members.get(tankId)?.get(username);
-    if (!m || m.password !== password) throw new Error('neko login failed: 401');
-    this.logins.push({ tankId, username });
-    return `session-${username}`;
-  }
-  updates: NekoMember[] = [];
-  async updateMember(tankId: string, _token: string, m: NekoMember) {
-    this.updates.push(m);
-    this.members.get(tankId)?.set(m.username, { ...m, password: this.members.get(tankId)?.get(m.username)?.password ?? '' });
-  }
-  async removeMember(tankId: string, _token: string, username: string) {
-    this.removed.push({ tankId, username });
-    this.members.get(tankId)?.delete(username);
-  }
-  destroyed: string[] = [];
-  failNextStart = false;
-  async ensureImage() {}
-  async pullImage() {}
-  async start(spec: TankSpec) {
-    if (this.failNextStart) {
-      this.failNextStart = false;
-      throw new Error('boom');
-    }
-    this.containers.set(spec.id, { spec, running: true });
-    return `container-${spec.id}`;
-  }
-  async waitReady() {}
-  async destroy(id: string) {
-    this.destroyed.push(id);
-    this.containers.delete(id);
-  }
-  async list(): Promise<ManagedContainer[]> {
-    return [...this.containers.entries()].map(([tankId, c]) => ({ tankId, containerId: `container-${tankId}`, running: c.running }));
-  }
-  async credentials(id: string): Promise<TankCredentials | null> {
-    const c = this.containers.get(id);
-    return c ? (c.legacy ?? { apiToken: c.spec.apiToken }) : null;
-  }
-  shots = 0;
-  async screenshot() {
-    this.shots++;
-    return Buffer.from([0xff, 0xd8, 0xff, 0xd9]);
-  }
-  disconnects: Array<{ tankId: string; username: string; apiToken: string }> = [];
-  async stats() {
-    return { cpuPercent: 42, memoryMb: 512 };
-  }
-  async disconnectUser(tankId: string, username: string, apiToken: string) {
-    this.disconnects.push({ tankId, username, apiToken });
-    return 1;
-  }
-}
 
 let app: FastifyInstance;
 let db: DB;
@@ -490,7 +422,7 @@ test('reconcile removes orphans, closes Tanks whose container vanished, and reco
   assert.equal(app2.tanks.credentialsFor(id), null);
   await app2.tanks.reconcile();
   const spec = orch.containers.get(id)!.spec;
-  assert.deepEqual(app2.tanks.credentialsFor(id), { apiToken: spec.apiToken });
+  assert.deepEqual(app2.tanks.credentialsFor(id), { apiToken: spec.apiToken, recordable: false });
   await app2.close();
   await app.tanks.close(id, 'test');
 });
@@ -649,7 +581,7 @@ test('guests: TANK links make watch-only temporary guests, wiped on leave, disco
   const id = await openTank(host, 'Guest night');
   const { code } = (await call(host, 'POST', `/tanks/${id}/codes`, { maxUses: 3 })).json();
 
-  assert.deepEqual((await call(null, 'GET', `/tank-codes/${code}`)).json(), { tankName: 'Guest night', host: 'gh' });
+  assert.deepEqual((await call(null, 'GET', `/tank-codes/${code}`)).json(), { tankName: 'Guest night', host: 'gh', recording: false });
   assert.equal((await call(null, 'GET', '/tank-codes/TANK-NOPE-NOPE')).statusCode, 404);
   assert.equal((await call(host, 'POST', `/tank-codes/${code}/guest`)).statusCode, 409, 'signed-in people join as themselves');
 

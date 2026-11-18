@@ -1,5 +1,6 @@
 import { useEffect, useState, type FormEvent } from 'react';
-import { api, ApiError, type AdminOverview, type RegistrationCode } from './api.ts';
+import { api, ApiError, type AdminOverview, type Recording, type RecordingStorage, type RegistrationCode } from './api.ts';
+import { bytes, clock } from './recording.tsx';
 import { useRealtimeEvent } from './realtime.ts';
 import { Link } from './router.tsx';
 import { Avatar } from './Avatar.tsx';
@@ -20,6 +21,13 @@ const left = (ms: number) => {
 export function AdminPage({ me }: { me: string }) {
   const [data, setData] = useState<AdminOverview | null>(null);
   const [error, setError] = useState('');
+  /** null = recording is off on this server. */
+  const [recs, setRecs] = useState<{ recordings: Recording[]; storage: RecordingStorage | null } | null>(null);
+
+  const loadRecordings = () => api.recordings().then(setRecs, () => setRecs(null));
+  useEffect(() => {
+    loadRecordings();
+  }, []);
 
   const load = () =>
     api.adminOverview().then(
@@ -37,6 +45,7 @@ export function AdminPage({ me }: { me: string }) {
   }, []);
   useRealtimeEvent((e) => {
     if (e.type === 'presence' || e.type === 'connected' || e.type === 'tank.updated' || e.type === 'tank.closed') load();
+    if (e.type === 'recordings.changed' || e.type === 'tank.recording' || e.type === 'connected') loadRecordings();
   });
 
   const act = async (fn: () => Promise<unknown>, question?: string) => {
@@ -91,6 +100,7 @@ export function AdminPage({ me }: { me: string }) {
                     <td>
                       <strong>{t.name}</strong>
                       {t.status === 'starting' && <span className="muted small"> · starting</span>}
+                      {t.recordingId && <span className="rec-tag">REC</span>}
                       <div className="muted small mono">UDP {t.udpPort}</div>
                     </td>
                     <td>{t.hostDisplayName}</td>
@@ -120,6 +130,32 @@ export function AdminPage({ me }: { me: string }) {
           </div>
         )}
       </section>
+
+      {recs?.storage && (
+        <section className="card">
+          <div className="card-head">
+            <h2>Recordings</h2>
+            <Link to="/recordings" className="small">
+              Open recordings →
+            </Link>
+          </div>
+          <p className="small">
+            {recs.recordings.filter((r) => r.status === 'ready').length} saved · {bytes(recs.storage.usedBytes)} used ·{' '}
+            {bytes(recs.storage.freeBytes)} free on the recordings disk · kept {recs.storage.keepDays} days after they end
+          </p>
+          {recs.storage.freeBytes !== null && recs.storage.freeBytes < recs.storage.minFreeGb * 1024 ** 3 && (
+            <p className="error">Less than {recs.storage.minFreeGb} GB free: new recordings can't start until space is freed.</p>
+          )}
+          {recs.recordings
+            .filter((r) => r.status === 'recording')
+            .map((r) => (
+              <p key={r.id} className="small">
+                <span className="rec-tag">REC</span> <strong>{r.tankName}</strong> · by {r.startedBy} ·{' '}
+                {clock(Date.now() - r.startedAt)} so far. Stop it from the Tank's page or close the Tank above.
+              </p>
+            ))}
+        </section>
+      )}
 
       <section className="card">
         <div className="card-head">

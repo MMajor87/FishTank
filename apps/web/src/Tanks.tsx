@@ -29,7 +29,7 @@ export function TanksCard() {
   };
   useEffect(load, []);
   useRealtimeEvent((e) => {
-    if (e.type === 'tank.updated' || e.type === 'tank.closed' || e.type === 'tank.removed' || e.type === 'tank.invite' || e.type === 'connected') load();
+    if (e.type === 'tank.updated' || e.type === 'tank.recording' || e.type === 'tank.closed' || e.type === 'tank.removed' || e.type === 'tank.invite' || e.type === 'connected') load();
     else if (e.type === 'friends.tanks' || e.type === 'friends.changed') api.friendsTanks().then((r) => setFriendTanks(r.tanks), () => {});
   });
 
@@ -96,6 +96,7 @@ export function TanksCard() {
                 <span className="tile-top">
                   <span className={`dot ${t.status === 'open' ? 'on' : 'starting'}`} />
                   <span className="muted small">{t.status === 'starting' ? 'Starting…' : 'Live'}</span>
+                  {t.recording && <span className="rec-tag">REC</span>}
                   {t.role === 'host' && <span className="badge">host</span>}
                 </span>
                 <strong className="tile-name">{t.name}</strong>
@@ -132,6 +133,7 @@ export function TanksCard() {
                   <span className="tile-top">
                     <span className={`dot ${t.status === 'open' ? 'on' : 'starting'}`} />
                     <span className="muted small">{t.status === 'starting' ? 'Starting…' : 'Live'}</span>
+                    {t.recording && <span className="rec-tag">REC</span>}
                   </span>
                   <strong className="tile-name">{t.name}</strong>
                   <span className="muted small tile-host">

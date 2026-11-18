@@ -10,10 +10,15 @@ services:
     environment:
       DOCKER_HOST: http://fishtank-docker-gate:2375
       TZ: ${TZ:-UTC}   # local time in logs and backup filenames (set TZ in .env)
+      # Recording: the Tank-side playback server listens only on the Tank network (docs/RECORDING.md).
+      RECORDING_TANK_HOST: 10.88.2.2
     volumes:
       - fishtank-data:/data
       # Nightly SQLite backups land in ./backups next to this file (outside the Docker volume).
       - ./backups:/backups
+      # Tank recordings (optional, docs/RECORDING.md). The app serves and deletes them.
+      # RECORDINGS_PATH in .env = a folder on the host instead (e.g. a bigger drive).
+      - ${RECORDINGS_PATH:-fishtank-recordings}:/recordings
     ports:
       # Local testing only; in production Caddy reaches the app over fishtank-edge.
       - "127.0.0.1:3080:3000"
@@ -72,6 +77,41 @@ services:
     environment:
       TANK_SOURCE_RANGE: 10.88.2.128/25
       ALLOW_DESTINATIONS: ${TANK_ALLOW_DESTINATIONS:-}
+      RECORDING_ENABLED: ${RECORDING_ENABLED:-false}
+      RECORDER_ADDRESS: 10.88.2.5
+      APP_TANK_ADDRESS: 10.88.2.2:3000
+      APP_PLAYBACK_ADDRESS: 10.88.2.2:3001   # recordings shared to a Tank (Tank-side page)
+
+  # Optional Tank recorder (docs/RECORDING.md), only started with the "recording" profile:
+  # set COMPOSE_PROFILES=recording and RECORDING_ENABLED=true in .env. MediaMTX takes RTMP from
+  # Tanks (only streams the app approves) and writes MP4s to the fishtank-recordings volume. It
+  # serves nothing; playback goes through the app. The egress firewall limits it to answering
+  # Tanks and calling the app.
+  recorder:
+    image: bluenviron/mediamtx:1.21.3-ffmpeg   # pinned: new versions add servers that default to on
+    container_name: fishtank-recorder
+    profiles: ["recording"]
+    restart: unless-stopped
+    user: "1000:1000"
+    entrypoint: ["sh", "/recorder/entrypoint.sh"]
+    volumes:
+      - ./recorder:/recorder:ro
+      - ${RECORDINGS_PATH:-fishtank-recordings}:/recordings   # same place as the app's
+    networks:
+      tanks:
+        ipv4_address: 10.88.2.5   # outside the Tank range; the firewall rules use this address
+    # The app creates the recordings volume (owned by uid 1000), so it must start first.
+    depends_on:
+      - app
+    # Time for MediaMTX to finish and remux the open segment when stopped mid-recording.
+    stop_grace_period: 2m
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
 
 networks:
   # Explicit subnets, so the stack works even when Docker's default address pools are exhausted.
@@ -98,3 +138,5 @@ networks:
 volumes:
   fishtank-data:
     name: fishtank-data
+  fishtank-recordings:
+    name: fishtank-recordings

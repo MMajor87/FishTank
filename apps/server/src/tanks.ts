@@ -7,6 +7,7 @@ import { signedAvatarUrl } from './avatars.ts';
 import { endInvite, logInvite } from './invitelog.ts';
 import type { NekoMember, Orchestrator, TankCredentials } from './orchestrator.ts';
 import type { Hub } from './realtime.ts';
+import type { RecordingManager } from './recordings.ts';
 import { guestIdentity, newToken, normalizeCode, randomCode, sha256 } from './security.ts';
 import { signToken, verifyToken } from './tickets.ts';
 
@@ -82,6 +83,8 @@ export class TankService {
   /** Nonces of tickets already exchanged (kept until they'd have expired anyway). */
   private usedTickets = new Map<string, number>();
   private timers: NodeJS.Timeout[] = [];
+  /** Set by the app when recording is wired in; ends a Tank's recording before it closes. */
+  recordings: RecordingManager | null = null;
 
   constructor(deps: TankServiceDeps) {
     this.cfg = deps.config.tanks;
@@ -149,7 +152,8 @@ export class TankService {
       .prepare(
         `SELECT t.id, t.name, t.status, t.created_at AS createdAt, t.expires_at AS expiresAt, m.role,
                 h.id AS hostId, h.username AS hostUsername, h.display_name AS hostDisplayName,
-                (SELECT COUNT(*) FROM tank_members x WHERE x.tank_id = t.id) AS memberCount
+                (SELECT COUNT(*) FROM tank_members x WHERE x.tank_id = t.id) AS memberCount,
+                EXISTS (SELECT 1 FROM recordings r WHERE r.tank_id = t.id AND r.status = 'recording') AS recording
          FROM tanks t
          JOIN tank_members m ON m.tank_id = t.id AND m.user_id = ?
          JOIN users h ON h.id = t.host_id
@@ -157,7 +161,7 @@ export class TankService {
          ORDER BY t.created_at DESC`,
       )
       .all(userId) as Array<Record<string, unknown> & { id: string }>;
-    return rows.map((r) => ({ ...r, viewerCount: this.viewersOf(r.id).length, previewAt: this.previewAt(r.id) }));
+    return rows.map((r) => ({ ...r, recording: !!r.recording, viewerCount: this.viewersOf(r.id).length, previewAt: this.previewAt(r.id) }));
   }
 
   /**
@@ -169,7 +173,8 @@ export class TankService {
       .prepare(
         `SELECT t.id, t.name, t.status, t.created_at AS createdAt, t.expires_at AS expiresAt,
                 h.id AS hostId, h.username AS hostUsername, h.display_name AS hostDisplayName, h.avatar_version AS avatarVersion,
-                (SELECT COUNT(*) FROM tank_members x WHERE x.tank_id = t.id) AS memberCount
+                (SELECT COUNT(*) FROM tank_members x WHERE x.tank_id = t.id) AS memberCount,
+                EXISTS (SELECT 1 FROM recordings r WHERE r.tank_id = t.id AND r.status = 'recording') AS recording
          FROM tanks t
          JOIN users h ON h.id = t.host_id AND h.disabled = 0
          JOIN friendships f ON f.status = 'accepted'
@@ -181,6 +186,7 @@ export class TankService {
       .all({ me: userId }) as Array<Record<string, unknown> & { id: string; hostId: string; avatarVersion: number | null }>;
     return rows.map(({ avatarVersion, ...r }) => ({
       ...r,
+      recording: !!r.recording,
       hostAvatarUrl: withAvatar({ id: r.hostId, avatarVersion }).avatarUrl,
       viewerCount: this.viewersOf(r.id).length,
       previewAt: this.previewAt(r.id),
@@ -246,7 +252,7 @@ export class TankService {
 
   private async startContainer(tank: TankRow): Promise<void> {
     const apiToken = newToken();
-    this.creds.set(tank.id, { apiToken });
+    this.creds.set(tank.id, { apiToken, recordable: !!this.cfg.broadcastPipeline });
     try {
       const containerId = await this.orch.start({ id: tank.id, udpPort: tank.udp_port, name: tank.name, apiToken });
       this.db.prepare('UPDATE tanks SET container_id = ? WHERE id = ?').run(containerId, tank.id);
@@ -276,6 +282,8 @@ export class TankService {
     if (res.changes !== 1) return false;
 
     this.log.info({ tankId, reason }, 'tank closed');
+    // Before the credentials go and the container is removed, so the stream ends cleanly.
+    await this.recordings?.endForTank(tankId, reason).catch((err) => this.log.warn({ err, tankId }, 'could not end recording'));
     this.notify(tankId, { type: 'tank.closed', tankId, name: tank.name, reason });
     this.creds.delete(tankId);
     this.nekoMembers.delete(tankId);
@@ -475,11 +483,16 @@ export class TankService {
   }
 
   /** Tank name and host for the join page (no login needed; the code is the secret). */
-  codeInfo(code: string): { tankName: string; host: string } | null {
+  codeInfo(code: string): { tankName: string; host: string; recording: boolean } | null {
     const found = this.findCode(code);
     const tank = found && this.get(found.tankId);
     if (!tank) return null;
-    return { tankName: tank.name, host: getUserSummary(this.db, tank.host_id)?.displayName ?? 'Someone' };
+    return {
+      tankName: tank.name,
+      host: getUserSummary(this.db, tank.host_id)?.displayName ?? 'Someone',
+      // Shown before a guest joins: what they do in the Tank may end up in a recording.
+      recording: !!this.recordings?.activeFor(tank.id),
+    };
   }
 
   /** The preview image for a valid TANK- invite code. */
@@ -689,7 +702,8 @@ export class TankService {
       .prepare(
         `SELECT t.id, t.name, t.status, t.udp_port AS udpPort, t.created_at AS createdAt, t.expires_at AS expiresAt,
                 t.last_active_at AS lastActiveAt, u.username AS hostUsername, u.display_name AS hostDisplayName,
-                (SELECT COUNT(*) FROM tank_members m WHERE m.tank_id = t.id) AS memberCount
+                (SELECT COUNT(*) FROM tank_members m WHERE m.tank_id = t.id) AS memberCount,
+                (SELECT r.id FROM recordings r WHERE r.tank_id = t.id AND r.status = 'recording') AS recordingId
          FROM tanks t JOIN users u ON u.id = t.host_id WHERE t.status != 'closed' ORDER BY t.created_at`,
       )
       .all() as Array<Record<string, unknown> & { id: string }>;

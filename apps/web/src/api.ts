@@ -8,6 +8,11 @@ export interface User {
   guestTankId: string | null;
 }
 
+/** Optional features this person can use. */
+export interface Features {
+  recordings: boolean;
+}
+
 export interface RegistrationCode {
   id: string;
   note: string | null;
@@ -57,6 +62,8 @@ export interface TankListItem {
   expiresAt: number;
   /** When the screen preview was taken (null = none yet). */
   previewAt: number | null;
+  /** Being recorded right now. */
+  recording?: boolean;
 }
 
 /** A live Tank hosted by a friend that you can drop in to. */
@@ -74,6 +81,8 @@ export interface FriendTank {
   expiresAt: number;
   /** When the screen preview was taken (null = none yet). */
   previewAt: number | null;
+  /** Being recorded right now. */
+  recording?: boolean;
 }
 
 export interface TankMember extends UserSummary {
@@ -100,7 +109,67 @@ export interface TankDetail {
   role?: 'host' | 'guest';
   members?: TankMember[];
   pendingInvitees?: string[];
+  /** null/absent when recording is turned off on this server. */
+  recording?: TankRecording | null;
   embedUrl?: string | null;
+}
+
+export interface TankRecording {
+  /** You may start/stop/time recordings here (an admin). */
+  canRecord: boolean;
+  /** False for Tanks opened before recording was turned on. */
+  supported: boolean;
+  active: { id: string; startedBy: string; startedAt: number; stopAt: number | null } | null;
+  /** Longest recording, in hours. */
+  maxHours: number;
+  /** Days a recording is kept after it ends. */
+  keepDays: number;
+  /** You may clip the last minute while it's recorded (accounts, not guests). */
+  canClip: boolean;
+  /** Length of a clip, in seconds. */
+  clipSeconds: number;
+  /** You may share recordings to play in this Tank (accounts, not guests). */
+  canShare: boolean;
+  /** The Tank-side Recordings page, as typed in the Tank's address bar. */
+  tankUrl: string;
+  /** Recordings shared to this Tank, most recent first. */
+  shared: SharedRecording[];
+}
+
+export interface SharedRecording {
+  id: string;
+  tankName: string;
+  startedBy: string;
+  startedAt: number;
+  durationMs: number | null;
+  expiresAt: number | null;
+  parts: Array<{ index: number; durationMs: number }>;
+  sharedBy: string;
+  sharedAt: number;
+}
+
+export interface Recording {
+  id: string;
+  tankName: string;
+  /** A clip is the last minute of a recording, saved by someone in the Tank. */
+  kind: 'recording' | 'clip';
+  /** Who recorded it (for clips: who clipped it). */
+  startedBy: string;
+  status: 'recording' | 'processing' | 'ready';
+  startedAt: number;
+  endedAt: number | null;
+  /** When it's wiped (set once it ends). */
+  expiresAt: number | null;
+  durationMs: number | null;
+  sizeBytes: number | null;
+  parts: Array<{ index: number; durationMs: number; sizeBytes: number }>;
+}
+
+export interface RecordingStorage {
+  usedBytes: number;
+  freeBytes: number | null;
+  keepDays: number;
+  minFreeGb: number;
 }
 
 /** A working TANK- invite link (only its last 4 characters are kept). */
@@ -138,6 +207,8 @@ export interface AdminOverview {
     memberCount: number;
     viewerCount: number;
     stats: { cpuPercent: number; memoryMb: number } | null;
+    /** Set while the Tank is being recorded. */
+    recordingId?: string | null;
   }>;
   users: AdminUser[];
   guests: AdminUser[];
@@ -198,7 +269,7 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
 }
 
 export const api = {
-  me: () => request<{ user: User }>('GET', '/me'),
+  me: () => request<{ user: User; features?: Features }>('GET', '/me'),
   login: (username: string, password: string, code?: string) =>
     request<{ user: User }>('POST', '/auth/login', code ? { username, password, code } : { username, password }),
   register: (b: { username: string; displayName: string; password: string; code: string }) =>
@@ -234,10 +305,22 @@ export const api = {
   tankInvites: () => request<{ invites: TankInvite[] }>('GET', '/tank-invites'),
   acceptTankInvite: (id: string) => request<{ tankId: string }>('POST', `/tank-invites/${id}/accept`, {}),
   declineTankInvite: (id: string) => request<{ ok: true }>('POST', `/tank-invites/${id}/decline`, {}),
-  tankCodeInfo: (code: string) => request<{ tankName: string; host: string }>('GET', `/tank-codes/${encodeURIComponent(code)}`),
+  tankCodeInfo: (code: string) =>
+    request<{ tankName: string; host: string; recording?: boolean }>('GET', `/tank-codes/${encodeURIComponent(code)}`),
   joinAsGuest: (code: string) => request<{ tankId: string }>('POST', `/tank-codes/${encodeURIComponent(code)}/guest`, {}),
   redeemTankCode: (code: string) => request<{ tankId: string }>('POST', '/tank-codes/redeem', { code }),
   removeTankMember: (id: string, userId: string) => request<{ ok: true }>('DELETE', `/tanks/${id}/members/${userId}`),
+
+  /** stopAt: epoch ms to stop automatically, null = no timer. */
+  startRecording: (tankId: string, stopAt: number | null) =>
+    request<{ recording: { id: string; startedAt: number; stopAt: number | null } }>('POST', `/tanks/${tankId}/recording`, { stopAt }),
+  setRecordingTimer: (tankId: string, stopAt: number | null) => request<{ recording: { id: string; stopAt: number | null } }>('PATCH', `/tanks/${tankId}/recording`, { stopAt }),
+  stopRecording: (tankId: string) => request<{ ok: true }>('DELETE', `/tanks/${tankId}/recording`),
+  recordings: () => request<{ recordings: Recording[]; storage: RecordingStorage | null }>('GET', '/recordings'),
+  deleteRecording: (id: string) => request<{ ok: true }>('DELETE', `/recordings/${id}`),
+  clip: (tankId: string) => request<{ clip: { id: string; durationMs: number; sizeBytes: number } }>('POST', `/tanks/${tankId}/clip`),
+  shareRecording: (tankId: string, recordingId: string) => request<{ ok: true }>('POST', `/tanks/${tankId}/playback`, { recordingId }),
+  unshareRecording: (tankId: string, recordingId: string) => request<{ ok: true }>('DELETE', `/tanks/${tankId}/playback/${recordingId}`),
 
   adminOverview: () => request<AdminOverview>('GET', '/admin/overview'),
   disableUser: (id: string) => request<{ ok: true }>('POST', `/admin/users/${id}/disable`, {}),

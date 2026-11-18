@@ -1,7 +1,7 @@
 import { lookup } from 'node:dns/promises';
 import { isIP } from 'node:net';
 import Docker from 'dockerode';
-import type { TankConfig } from './config.ts';
+import { screenFps, type TankConfig } from './config.ts';
 import { START_PAGE_PATH, firefoxUserJs, startPageHtml, withFishTankPolicies } from './startpage.ts';
 import { tarFiles, untarFirstFile } from './tar.ts';
 
@@ -15,6 +15,8 @@ export interface TankCredentials {
   /** Legacy shared passwords. */
   userPassword?: string;
   adminPassword?: string;
+  /** Started with FishTank's broadcast pipeline, so it can be recorded. */
+  recordable?: boolean;
 }
 
 /** A person's Neko login inside one Tank. */
@@ -80,6 +82,23 @@ export interface Orchestrator {
   stats(tankId: string): Promise<TankStats | null>;
   /** A JPEG of the Tank's screen, via Neko's API (null if unavailable). */
   screenshot(tankId: string, apiToken: string): Promise<Buffer | null>;
+  /**
+   * Makes Neko push its screen and audio to an RTMP URL (recording). Rejects with a
+   * BroadcastError; status 422 means it is already broadcasting.
+   */
+  startBroadcast(tankId: string, apiToken: string, url: string): Promise<void>;
+  /** Stops Neko's broadcast (no-op if it isn't broadcasting). */
+  stopBroadcast(tankId: string, apiToken: string): Promise<void>;
+  /** The Tank container's IP on the Tank network (null if it isn't running there). */
+  address(tankId: string): Promise<string | null>;
+}
+
+export class BroadcastError extends Error {
+  status: number;
+  constructor(message: string, status: number) {
+    super(message);
+    this.status = status;
+  }
 }
 
 export const containerName = (tankId: string) => `tank-${tankId}`;
@@ -93,6 +112,7 @@ const LABEL_TANK = 'fishtank.tank';
 const USER_PW = 'NEKO_MEMBER_MULTIUSER_USER_PASSWORD';
 const ADMIN_PW = 'NEKO_MEMBER_MULTIUSER_ADMIN_PASSWORD';
 const API_TOKEN = 'NEKO_SESSION_API_TOKEN';
+const BROADCAST_PIPELINE = 'NEKO_CAPTURE_BROADCAST_PIPELINE';
 const NEKO_MEMBERS_FILE = '/tmp/neko-members.json';
 const TANK_CAP_DROP = ['NET_RAW', 'MKNOD', 'AUDIT_WRITE'];
 const FIREFOX_POLICIES = '/usr/lib/firefox/distribution/policies.json';
@@ -166,6 +186,9 @@ export class DockerOrchestrator implements Orchestrator {
         'NEKO_DESKTOP_UPLOAD_DROP=false',
         // Browser clock matches the home IP's region (UTC next to a US IP looks like a bot).
         ...(c.timezone ? [`TZ=${c.timezone}`] : []),
+        // Recording: how Neko encodes a broadcast. No URL or autostart here; the app starts a
+        // broadcast through the API only while a recording runs (docs/RECORDING.md).
+        ...(c.broadcastPipeline ? [`${BROADCAST_PIPELINE}=${c.broadcastPipeline}`] : []),
       ],
       ExposedPorts: { [udp]: {} },
       // The image's own healthcheck calls /health, but with a path prefix it lives under it.
@@ -208,8 +231,10 @@ export class DockerOrchestrator implements Orchestrator {
     for await (const chunk of archive as AsyncIterable<Buffer>) chunks.push(chunk);
     const current = untarFirstFile(Buffer.concat(chunks));
     const base = current ? JSON.parse(current.toString('utf8')) : {};
-    const policies = Buffer.from(JSON.stringify(withFishTankPolicies(base, this.cfg.startTiles, this.cfg.trustedSites), null, 2));
-    const page = Buffer.from(startPageHtml(tankName, this.cfg.startTiles));
+    // With recording on, a Recordings tile opens the Tank-side page of recordings shared to this Tank.
+    const tiles = this.cfg.recordingsUrl ? [...this.cfg.startTiles, { title: 'Recordings', url: this.cfg.recordingsUrl }] : this.cfg.startTiles;
+    const policies = Buffer.from(JSON.stringify(withFishTankPolicies(base, tiles, this.cfg.trustedSites, this.cfg.recordingsUrl ? [new URL(this.cfg.recordingsUrl).origin] : []), null, 2));
+    const page = Buffer.from(startPageHtml(tankName, tiles));
 
     await container.putArchive(
       tarFiles([
@@ -291,6 +316,36 @@ export class DockerOrchestrator implements Orchestrator {
     return buf.length > 0 && buf.length <= 2_000_000 ? buf : null;
   }
 
+  async startBroadcast(tankId: string, apiToken: string, url: string): Promise<void> {
+    const res = await fetch(`http://${containerName(tankId)}:8080${tankPathPrefix(tankId)}/api/room/broadcast/start`, {
+      method: 'POST',
+      headers: { authorization: `Bearer ${apiToken}`, 'content-type': 'application/json' },
+      body: JSON.stringify({ url }),
+      signal: AbortSignal.timeout(10_000),
+    });
+    if (!res.ok) throw new BroadcastError(`neko broadcast start failed: ${res.status}`, res.status);
+  }
+
+  async stopBroadcast(tankId: string, apiToken: string): Promise<void> {
+    const res = await fetch(`http://${containerName(tankId)}:8080${tankPathPrefix(tankId)}/api/room/broadcast/stop`, {
+      method: 'POST',
+      headers: { authorization: `Bearer ${apiToken}` },
+      signal: AbortSignal.timeout(10_000),
+    });
+    // 422 = not broadcasting, which is what we wanted.
+    if (!res.ok && res.status !== 422) throw new BroadcastError(`neko broadcast stop failed: ${res.status}`, res.status);
+  }
+
+  async address(tankId: string): Promise<string | null> {
+    try {
+      const info = await this.docker.getContainer(containerName(tankId)).inspect();
+      return info.NetworkSettings?.Networks?.[this.cfg.network]?.IPAddress || null;
+    } catch (err) {
+      if (statusOf(err) === 404) return null;
+      throw err;
+    }
+  }
+
   async disconnectUser(tankId: string, username: string, apiToken: string): Promise<number> {
     const base = `http://${containerName(tankId)}:8080${tankPathPrefix(tankId)}/api/sessions`;
     const auth = { authorization: `Bearer ${apiToken}` };
@@ -363,7 +418,7 @@ export class DockerOrchestrator implements Orchestrator {
       const adminPassword = env.get(ADMIN_PW);
       const apiToken = env.get(API_TOKEN);
       if (userPassword && adminPassword) return { userPassword, adminPassword, apiToken }; // legacy Tank
-      return apiToken ? { apiToken } : null;
+      return apiToken ? { apiToken, recordable: env.has(BROADCAST_PIPELINE) } : null;
     } catch (err) {
       if (statusOf(err) === 404) return null;
       throw err;
@@ -371,11 +426,7 @@ export class DockerOrchestrator implements Orchestrator {
   }
 }
 
-/** Refresh rate from a Neko screen spec like "1280x720@30" (30 if absent or invalid). */
-export function screenFps(screen: string): number {
-  const fps = Number(screen.split('@')[1]);
-  return Number.isInteger(fps) && fps > 0 && fps <= 60 ? fps : 30;
-}
+export { screenFps };
 
 /**
  * Neko's WebRTC stack rejects hostnames in NAT1TO1 ("invalid address rewrite mapping"),

@@ -10,6 +10,7 @@ import type { DB } from './db.ts';
 import { friendIds } from './friends.ts';
 import { Hub } from './realtime.ts';
 import { DockerOrchestrator, type Orchestrator } from './orchestrator.ts';
+import { RecordingManager, type RecordingTimings } from './recordings.ts';
 import { TankError, TankService } from './tanks.ts';
 import { SESSION_COOKIE, getSessionUser, type SessionUser } from './sessions.ts';
 import { authRoutes } from './routes/auth.ts';
@@ -22,6 +23,7 @@ import { accountRoutes } from './routes/account.ts';
 import { adminRoutes } from './routes/admin.ts';
 import { avatarRoutes } from './routes/avatars.ts';
 import { shareRoutes } from './routes/share.ts';
+import { recorderHookRoutes, recordingRoutes } from './routes/recordings.ts';
 
 declare module 'fastify' {
   interface FastifyRequest {
@@ -30,6 +32,7 @@ declare module 'fastify' {
   interface FastifyInstance {
     hub: Hub;
     tanks: TankService;
+    recordings: RecordingManager;
   }
 }
 
@@ -44,12 +47,16 @@ export interface AppDeps {
 export interface RouteCtx extends AppDeps {
   hub: Hub;
   tanks: TankService;
+  recordings: RecordingManager;
 }
 
 const UNSAFE_METHODS = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
 const HEARTBEAT_MS = 30_000;
 
-export async function buildApp({ config, db, orchestrator }: AppDeps, opts: { logger?: boolean; heartbeatMs?: number } = {}): Promise<FastifyInstance> {
+export async function buildApp(
+  { config, db, orchestrator }: AppDeps,
+  opts: { logger?: boolean; heartbeatMs?: number; recordingTimings?: Partial<RecordingTimings>; recorderFetch?: typeof fetch } = {},
+): Promise<FastifyInstance> {
   const app = Fastify({
     // Request URLs can carry invite and sign-up codes (/join/TANK-…, /?code=FISH-…): keep them out of logs.
     logger:
@@ -75,14 +82,12 @@ export async function buildApp({ config, db, orchestrator }: AppDeps, opts: { lo
   });
   app.decorate('hub', hub);
 
-  const tanks = new TankService({
-    config,
-    db,
-    hub,
-    orchestrator: orchestrator ?? new DockerOrchestrator(config.tanks, config.dockerHost, (obj, msg) => app.log.warn(obj, msg)),
-    log: app.log,
-  });
+  const orch = orchestrator ?? new DockerOrchestrator(config.tanks, config.dockerHost, (obj, msg) => app.log.warn(obj, msg));
+  const tanks = new TankService({ config, db, hub, orchestrator: orch, log: app.log });
   app.decorate('tanks', tanks);
+  const recordings = new RecordingManager({ config, db, hub, orchestrator: orch, tanks, log: app.log, timings: opts.recordingTimings, fetch: opts.recorderFetch });
+  if (recordings.enabled) tanks.recordings = recordings;
+  app.decorate('recordings', recordings);
 
   // Expected Tank failures carry their own status; everything else is a 500.
   app.setErrorHandler((err, req, reply) => {
@@ -135,6 +140,7 @@ export async function buildApp({ config, db, orchestrator }: AppDeps, opts: { lo
   app.addHook('preClose', async () => {
     clearInterval(heartbeat);
     tanks.stopBackground();
+    recordings.stopBackground();
     hub.closeAll();
   });
 
@@ -162,7 +168,7 @@ export async function buildApp({ config, db, orchestrator }: AppDeps, opts: { lo
 
   app.get('/api/health', async () => ({ ok: true }));
 
-  const ctx: RouteCtx = { config, db, hub, tanks };
+  const ctx: RouteCtx = { config, db, hub, tanks, recordings };
   await app.register(authRoutes, { prefix: '/api', ...ctx });
   await app.register(codeRoutes, { prefix: '/api', ...ctx });
   await app.register(friendRoutes, { prefix: '/api', ...ctx });
@@ -172,6 +178,10 @@ export async function buildApp({ config, db, orchestrator }: AppDeps, opts: { lo
   await app.register(accountRoutes, { prefix: '/api', ...ctx });
   await app.register(adminRoutes, { prefix: '/api', ...ctx });
   await app.register(avatarRoutes, { prefix: '/api', ...ctx });
+  if (recordings.enabled) {
+    await app.register(recordingRoutes, { prefix: '/api', ...ctx });
+    await app.register(recorderHookRoutes, { ...ctx }); // /auth/recorder*, called by the recorder only
+  }
 
   // Serve the built web app (production). Unknown non-API paths fall back to index.html.
   const webDist = config.webDist ? resolve(config.webDist) : null;
